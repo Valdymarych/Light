@@ -1,57 +1,51 @@
 from pygame import *
 from math import sin,pi
+from numpy import array,ones,zeros
+import numpy as np
 init()
 
-class Cube:
-    def __init__(self,m,x):
-        self.y=0
-        self.next_y=0
-        self.vel=0
-        self.m=m
-        self.x=x
-
-    def update(self,neighborhood,dt):
-        dx=sum([i.y for i in neighborhood])/len(neighborhood)-self.y
-        self.vel+=dx/self.m*dt
-        self.next_y=self.y+self.vel*dt
-
-    def flip(self):
-        self.y=self.next_y
-
 class LightSurface:
-    def __init__(self,dt,game):
+    def __init__(self,dt,game,m):
         self.n=game.WIDTH-40
-        self.cubes=[Cube(1,i+20) for i in range(self.n)]
-        self.cubes[0].m=10000000
-        self.cubes[-1].m=10000000
+
+        self.y=zeros(self.n,dtype=np.float16)
+        self.vel=zeros(self.n,dtype=np.float16)
+        self.m=ones(self.n,dtype=np.int32)
+        self.m*=m
+        self.m[0]=10000000
+        self.m[-1]=10000000
+        self.dx=zeros(self.n,dtype=np.float16)
+
         self.dt=dt
         self.g=game
 
     def updateCubes(self):
-        for i in range(len(self.cubes)):
-            neighborhood=[]
-            if i!=0:
-                neighborhood.append(self.cubes[i-1])
-            if i!=len(self.cubes)-1:
-                neighborhood.append(self.cubes[i+1])
-            self.cubes[i].update(neighborhood,self.dt)
-        for c in self.cubes:
-            c.flip()
+        self.dx[:-1]=self.y[1:]
+        self.dx[-1]=0
+        self.dx[1:]=self.dx[1:]+self.y[:-1]
+        self.dx=self.dx/2
+        self.dx=self.dx-self.y
 
-    def draw(self):
-        for i in range(len(self.cubes)):
-            draw.rect(self.g.win,(255,255,255),[self.cubes[i].x,self.g.HEIGHT/2+self.cubes[i].y,1,1])
+
+
+
+        self.vel=self.vel+self.dx/self.m#*self.dt
+        self.y=self.y+self.vel#*self.dt
+
+
+
+    def draw(self,y):
+        for i in range(self.n):
+            draw.rect(self.g.win,(255,255,255),[20+i,y+self.y[i],1,1])
 
     def move(self,pos):
-        for c in self.cubes:
-            if c.x==pos[0]:
-                c.y=pos[1]-self.g.HEIGHT/2
+        self.y[pos[0]-20]=pos[1]-self.g.HEIGHT/2
 
 class Game:
     def __init__(self):
         self.WIDTH=1200
         self.HEIGHT=600
-        self.FPS=60
+        self.FPS=6000
         self.dt=1
         self.isRunning=True
 
@@ -60,7 +54,8 @@ class Game:
         self.win=display.set_mode((self.WIDTH,self.HEIGHT))
         self.clock=time.Clock()
 
-        self.lightSurface=LightSurface(self.dt,self)
+        self.lightSurface=LightSurface(self.dt,self,1)
+        self.lightSurface2 = LightSurface(self.dt, self,4)
 
         self.mpos=mouse.get_pos()
         self.mpress=mouse.get_pressed()
@@ -69,6 +64,8 @@ class Game:
         self.mpos = mouse.get_pos()
         self.mpress = mouse.get_pressed()
         self.lightSurface.updateCubes()
+        self.lightSurface2.updateCubes()
+
         for e in event.get():
             if e.type==QUIT:
                 self.stop()
@@ -76,9 +73,11 @@ class Game:
         self.t += 1
         if self.t/60<pi:
             self.lightSurface.move([20,self.HEIGHT/2+100*sin(self.t/60)])
+            self.lightSurface2.move([20, self.HEIGHT / 2 + 100 * sin(self.t / 60)])
 
     def DrawStuff(self):
-        self.lightSurface.draw()
+        self.lightSurface.draw(150)
+        self.lightSurface2.draw(450)
 
     def WindowUpdateStuff(self):
         self.UpdateStuff()
