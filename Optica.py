@@ -3,10 +3,10 @@ from typing import Tuple,List,Union
 from pygame import *
 
 class Intersection:
-    def __init__(self,pos: Vector2,cameDir: Vector2,wentDir: Vector2,length):
+    def __init__(self,pos: Vector2,cameDir: Vector2,wentDirs: List[Vector2],length):
         self.pos: Vector2=pos
         self.cameDir: Vector2=cameDir
-        self.wentDir: Vector2=wentDir
+        self.wentDirs: List[Vector2]=wentDirs
         self.length: float=length
 
 class Barrier:
@@ -52,10 +52,9 @@ class Mirror(Barrier):
                 exist=float(self.along.cross(startDir))
                 if exist>0 or self.isBilateral:
                     nextDir=startDir-2*self.normal*self.normal.dot(startDir)
-                    return [Intersection(self.start+self.along*s,startDir,nextDir,32000*t)]
+                    return [Intersection(self.start+self.along*s,startDir,[nextDir],32000*t)]
 
-                return [Intersection(self.start+self.along*s,startDir,Vector2(0,0),32000*t)]
-
+                return [Intersection(self.start+self.along*s,startDir,[],32000*t)]
         return []
     def draw(self,win):
         draw.line(win,(255,255,255),self.start,self.end)
@@ -67,7 +66,7 @@ class Ray:
         self.construction:List[Union[Tuple,Vector2]]=[Vector2(0,0)]
 
     def construct(self,barriers:List[Barrier]):
-        intersections: List[Intersection]=[]
+        intersection: Intersection=Intersection(self.startPos+self.startDir*32000,self.startDir,[],32000)
         min_length: float=64000
         for barrier in barriers:
             intersectionsWithBarrier=barrier.getIntersections(self.startPos,self.startDir)
@@ -76,17 +75,13 @@ class Ray:
                     continue
                 elif i.length<min_length:
                     min_length=i.length
-                    intersections=[i]
-                elif i.length==min_length:
-                    intersections.append(i)
-        if len(intersections)==0:
-            return self.startPos,self.startPos+self.startDir*64000
-        if len(intersections)==1:
-            if intersections[0].wentDir.magnitude()==0:
-                return self.startPos,intersections[0].pos
-            return self.startPos,*Ray(intersections[0].pos,intersections[0].wentDir).construct(barriers)
-        if len(intersections)>1:
-            return self.startPos,[list(Ray(i.pos,i.wentDir).construct(barriers)) for i in intersections]
+                    intersection=i
+        if len(intersection.wentDirs)==0:
+            return self.startPos,intersection.pos
+        if len(intersection.wentDirs)==1:
+            return self.startPos,*Ray(intersection.pos,intersection.wentDirs[0]).construct(barriers)
+        if len(intersection.wentDirs)>1:
+            return self.startPos,[list(Ray(intersection.pos,wentDir).construct(barriers)) for wentDir in intersection.wentDirs]
     def fullConstruct(self,barriers:List[Barrier]):
         self.construction=list(self.construct(barriers))
 
@@ -108,7 +103,7 @@ class Game:
     def __init__(self):
         self.WIDTH: int = 1200
         self.HEIGHT: int = 600
-        self.FPS: int = 60
+        self.FPS: int = 40
         self.isRunning: bool = True
 
         self.win: Surface = display.set_mode((self.WIDTH, self.HEIGHT))
@@ -117,7 +112,7 @@ class Game:
         self.mPos: Vector2 = Vector2(mouse.get_pos())
         self.mPress: Tuple[bool,bool,bool]=mouse.get_pressed()
 
-        self.mir=Mirror(Vector2(400,500),Vector2(800,100))
+        self.mir=Mirror(Vector2(600,300),Vector2(800,100))
 
         self.ray0 = Ray(Vector2(200, 200), Vector2(3,0))
         self.ray0.fullConstruct(Barrier.barriers)
