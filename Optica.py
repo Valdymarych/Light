@@ -1,6 +1,23 @@
-from typing import Tuple,List,Union
+from typing import Tuple,List,Union,Dict
 
 from pygame import *
+
+class Skeleton:
+    def __init__(self,points: Dict[str,Vector2]):
+        self.points=points
+
+    def __getattr__(self, item:str):
+        return self.points.get(item)
+
+    def __setattr__(self, key:str, value:any):
+        if key=="points":
+            super().__setattr__(key, value)
+        else:
+            if key in self.points.keys():
+                raise UserWarning("setter error")
+            else:
+                super().__setattr__(key, value)
+
 
 class Intersection:
     def __init__(self,pos: Vector2,cameDir: Vector2,wentDirs: List[Vector2],length):
@@ -13,8 +30,9 @@ class Barrier:
     barriers=[]
     def __init__(self):
         Barrier.barriers.append(self)
+        self.skeleton:Skeleton=Skeleton({})
 
-    def build(self):
+    def build(self):  # sceleton -> points -> other
         pass
 
     def getIntersections(self,startPos:Vector2,startDir:Vector2)-> List[Intersection]:
@@ -26,7 +44,7 @@ class Mirror(Barrier):
         self.start=start
         self.end=end
         self.isBilateral=isBilateral
-
+        self.skeleton:Skeleton=Skeleton({"start":self.start,"end":self.end})
         self.build()
 
     def build(self):
@@ -88,7 +106,7 @@ class Ray:
     def draw(self,win):
         self.drawPart(win,self.construction)
 
-    def drawPart(self,win,construction):
+    def drawPart(self,win,construction:list):
         if type(construction[-1])==list:
             for i in range(1,len(construction)-1):
                 draw.line(win,(255,255,255),construction[i-1],construction[i])
@@ -120,9 +138,10 @@ class Game:
     def UpdateStuff(self):
         self.mPos = Vector2(mouse.get_pos())
         self.mPress = mouse.get_pressed()
-        self.mir.start=self.mPos
+        self.mir.skeleton.start.xy=self.mPos.xy
         self.mir.build()
         self.ray0.fullConstruct(Barrier.barriers)
+
         for e in event.get():
             if e.type == QUIT:
                 self.stop()
