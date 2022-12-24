@@ -18,13 +18,13 @@ class Skeleton:
             else:
                 super().__setattr__(key, value)
 
-
 class Intersection:
-    def __init__(self,pos: Vector2,cameDir: Vector2,wentDirs: List[Vector2],length):
+    def __init__(self,pos: Vector2,cameDir: Vector2,wentDirs: List[Vector2],barrier,length:float):
         self.pos: Vector2=pos
         self.cameDir: Vector2=cameDir
         self.wentDirs: List[Vector2]=wentDirs
         self.length: float=length
+        self.barrier=barrier
 
 class Barrier:
     barriers=[]
@@ -35,30 +35,40 @@ class Barrier:
     def build(self):  # sceleton -> points -> other
         pass
 
-    def getIntersections(self,startPos:Vector2,startDir:Vector2)-> List[Intersection]:
+    def getIntersections(self,startPos:Vector2,startDir:Vector2,source:any)-> List[Intersection]:
         pass
 
-class Mirror(Barrier):
-    def __init__(self,start: Vector2,end: Vector2,isBilateral:bool=False):
-        super(Mirror, self).__init__()
+    def draw(self,win:Surface):
+        pass
+
+class FlatBarrier(Barrier):
+    def __init__(self,start: Vector2,end: Vector2):
+        super(FlatBarrier, self).__init__()
         self.start=start
         self.end=end
-        self.isBilateral=isBilateral
+        self.along:Vector2=Vector2(0,0)
+        self.length:float=0
+        self.normal:Vector2=Vector2(0,0)
+        self.alongNormal:Vector2=Vector2(0,0)
         self.skeleton:Skeleton=Skeleton({"start":self.start,"end":self.end})
         self.build()
 
-    def build(self):
-        self.along:Vector2=self.end-self.start
-        self.length:float=self.along.magnitude()
-        self.normal:Vector2=Vector2(-self.along.y,self.along.x)/self.length
-        self.alongNormal:Vector2=self.along.normalize()
 
-    def getIntersections(self, startPos: Vector2, startDir: Vector2) -> List[Intersection]:
+
+    def build(self):
+        self.along: Vector2 = self.end - self.start
+        self.length: float = self.along.magnitude()
+        self.normal: Vector2 = Vector2(-self.along.y, self.along.x) / self.length
+        self.alongNormal: Vector2 = self.along.normalize()
+
+    def getIntersections(self, startPos: Vector2, startDir: Vector2, source:any) -> List[Intersection]:
         x1,y1=self.start.xy
         dx1,dy1=self.along.xy
         x2,y2=startPos.xy
         dx2,dy2=(startDir*32000).xy
 
+        if source==self:
+            return []
 
         if dy1*dx2!=dx1*dy2:
             s=(y2*dx2-y1*dx2+x1*dy2-x2*dy2)/(dy1*dx2-dx1*dy2)
@@ -67,15 +77,62 @@ class Mirror(Barrier):
             else:
                 t=(y1-y2+s*dy1)/dy2
             if 0<s<1 and 0<t<1:
-                exist=float(self.along.cross(startDir))
-                if exist>0 or self.isBilateral:
-                    nextDir=startDir-2*self.normal*self.normal.dot(startDir)
-                    return [Intersection(self.start+self.along*s,startDir,[nextDir],32000*t)]
-
-                return [Intersection(self.start+self.along*s,startDir,[],32000*t)]
+                return self.getAngle(Intersection(self.start + self.along * s, startDir,[],self,32000*t))
         return []
+
+    def getAngle(self,intersection:Intersection)->List[Intersection]:
+        pass
+
+class FlatMirror(FlatBarrier):
+    def __init__(self,start: Vector2,end: Vector2,isBilateral:bool=False):
+        super(FlatMirror, self).__init__(start,end)
+        self.isBilateral=isBilateral
+
+    def getAngle(self,intersection:Intersection) ->List[Intersection]:
+        exist = float(self.along.cross(intersection.cameDir))
+        if exist > 0 or self.isBilateral:
+            nextDir = intersection.cameDir - 2 * self.normal * self.normal.dot(intersection.cameDir)
+            return [Intersection(intersection.pos, intersection.cameDir, [nextDir], intersection.barrier,intersection.length)]
+
+        return [Intersection(intersection.pos, intersection.cameDir, [], intersection.barrier, intersection.length)]
+
     def draw(self,win):
         draw.line(win,(255,255,255),self.start,self.end)
+
+class FlatRefractingSurface(FlatBarrier):
+    def __init__(self,start: Vector2,end: Vector2,n0:float,n:float):
+        super(FlatRefractingSurface, self).__init__(start,end)
+        self.n0:float=n0
+        self.n:float=n
+    def getAngle(self,intersection:Intersection) ->List[Intersection]:
+        x = self.alongNormal.dot(intersection.cameDir)
+        direction = float(self.along.cross(intersection.cameDir))
+        n = self.n / self.n0
+        if direction < 0:
+            n = self.n0 / self.n
+
+        if n * x>1:  # sin B > 1
+            nextDir=self.alongNormal*x/abs(x)
+        else:
+            y = n * x * ((1 - x ** 2) / (1 - (x*n) ** 2)) ** 0.5
+            nextDir = intersection.cameDir - self.alongNormal * (x - y)
+            nextDir.normalize()
+        nextDir2 = intersection.cameDir - 2 * self.normal * self.normal.dot(intersection.cameDir)
+        return [Intersection(intersection.pos, intersection.cameDir, [nextDir, nextDir2], intersection.barrier, intersection.length)]
+    def draw(self,win):
+        draw.line(win,(255,255,255),self.start,self.end)
+
+class FlatScreen(FlatBarrier):
+    def __init__(self,start:Vector2,end:Vector2):
+        super(FlatScreen, self).__init__(start,end)
+
+    def getAngle(self,intersection:Intersection) ->List[Intersection]:
+        return [Intersection(intersection.pos,intersection.cameDir,[],intersection.barrier,intersection.length)]
+
+    def draw(self,win:Surface):
+        draw.line(win,(255,255,255),self.start,self.end)
+
+
 
 class Ray:
     def __init__(self, pos: Vector2, direction: Vector2):
@@ -83,11 +140,11 @@ class Ray:
         self.startDir: Vector2 = direction/direction.length()
         self.construction:List[Union[Tuple,Vector2]]=[Vector2(0,0)]
 
-    def construct(self,barriers:List[Barrier]):
-        intersection: Intersection=Intersection(self.startPos+self.startDir*32000,self.startDir,[],32000)
+    def construct(self,barriers:List[Barrier],source=None):
+        intersection: Intersection=Intersection(self.startPos+self.startDir*32000,self.startDir,[],source,32000)
         min_length: float=64000
         for barrier in barriers:
-            intersectionsWithBarrier=barrier.getIntersections(self.startPos,self.startDir)
+            intersectionsWithBarrier=barrier.getIntersections(self.startPos,self.startDir,source)
             for i in intersectionsWithBarrier:
                 if i.length<0.01:
                     continue
@@ -97,9 +154,9 @@ class Ray:
         if len(intersection.wentDirs)==0:
             return self.startPos,intersection.pos
         if len(intersection.wentDirs)==1:
-            return self.startPos,*Ray(intersection.pos,intersection.wentDirs[0]).construct(barriers)
+            return self.startPos,*Ray(intersection.pos,intersection.wentDirs[0]).construct(barriers,intersection.barrier)
         if len(intersection.wentDirs)>1:
-            return self.startPos,[list(Ray(intersection.pos,wentDir).construct(barriers)) for wentDir in intersection.wentDirs]
+            return self.startPos,[list(Ray(intersection.pos,wentDir).construct(barriers,intersection.barrier)) for wentDir in intersection.wentDirs]
     def fullConstruct(self,barriers:List[Barrier]):
         self.construction=list(self.construct(barriers))
 
@@ -111,11 +168,10 @@ class Ray:
             for i in range(1,len(construction)-1):
                 draw.line(win,(255,255,255),construction[i-1],construction[i])
             for i in range(len(construction[-1])):
-                self.drawPart(win,[self.construction[-2]].extend(construction[-1][0]))
+                self.drawPart(win,[self.construction[-2]]+construction[-1][i])
         else:
             for i in range(1,len(construction)):
                 draw.line(win,(255,255,255),construction[i-1],construction[i])
-
 
 class Game:
     def __init__(self):
@@ -130,15 +186,18 @@ class Game:
         self.mPos: Vector2 = Vector2(mouse.get_pos())
         self.mPress: Tuple[bool,bool,bool]=mouse.get_pressed()
 
-        self.mir=Mirror(Vector2(600,300),Vector2(800,100))
-
+        self.mir=FlatRefractingSurface(Vector2(785,300),Vector2(800,100),3/2,1)
+        self.screen=FlatMirror(Vector2(150,30),Vector2(50,150))
+        print(Barrier.barriers)
         self.ray0 = Ray(Vector2(200, 200), Vector2(3,0))
         self.ray0.fullConstruct(Barrier.barriers)
+        print(self.ray0.construction)
 
     def UpdateStuff(self):
         self.mPos = Vector2(mouse.get_pos())
         self.mPress = mouse.get_pressed()
-        self.mir.skeleton.start.xy=self.mPos.xy
+        if self.mPress[0]:
+            self.mir.skeleton.start.xy=self.mPos.xy
         self.mir.build()
         self.ray0.fullConstruct(Barrier.barriers)
 
