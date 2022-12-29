@@ -118,7 +118,7 @@ class FlatMirror(FlatBarrier):
 
     def build(self):
         super(FlatMirror, self).build()
-        self.strokeCount=int(self.length/FlatMirror.strokeStep)
+        self.strokeCount=int(self.length/FlatMirror.strokeStep)+1
         self.strokeStep=self.length/self.strokeCount
 
     def getAngle(self,intersection:Intersection) ->List[Intersection]:
@@ -145,15 +145,20 @@ class FlatRefractingSurface(FlatBarrier):
         n = self.n / self.n0
         if direction < 0:
             n = self.n0 / self.n
+        nextDir2 = intersection.cameDir - 2 * self.normal * self.normal.dot(intersection.cameDir)
+        if abs(n * x)>1:  # sin B > 1
+            #nextDir=self.alongNormal*x/abs(x)
+            return [Intersection(intersection.pos, intersection.cameDir, [nextDir2], intersection.barrier,
+                                 intersection.length)]
 
-        if n * x>1:  # sin B > 1
-            nextDir=self.alongNormal*x/abs(x)
         else:
             y = n * x * ((1 - x ** 2) / (1 - (x*n) ** 2)) ** 0.5
+
             nextDir = intersection.cameDir - self.alongNormal * (x - y)
             nextDir.normalize()
-        nextDir2 = intersection.cameDir - 2 * self.normal * self.normal.dot(intersection.cameDir)
-        return [Intersection(intersection.pos, intersection.cameDir, [nextDir, nextDir2], intersection.barrier, intersection.length)]
+            return [Intersection(intersection.pos, intersection.cameDir, [nextDir, nextDir2], intersection.barrier,
+                                 intersection.length)]
+
     def draw(self,win):
         draw.line(win,(255,255,255),self.start,self.end)
 
