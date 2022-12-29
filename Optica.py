@@ -21,7 +21,6 @@ class PointsMover:
         else:
             self.movePoint=None
 
-
 class Skeleton:
     skeletons=[]
     points=[]
@@ -194,18 +193,35 @@ class Ray:
     def fullConstruct(self,barriers:List[Barrier]):
         self.construction=list(self.construct(barriers))
 
-    def draw(self,win):
-        self.drawPart(win,self.construction)
+    def draw(self,win,color:Tuple[int,int,int]=(255,255,255)):
+        self.drawPart(win,self.construction,color)
 
-    def drawPart(self,win,construction:list):
+    def drawPart(self,win,construction:list,color:Tuple[int,int,int]=(255,255,255)):
         if type(construction[-1])==list:
             for i in range(1,len(construction)-1):
-                draw.line(win,(255,0,0),construction[i-1],construction[i],3)
+                draw.line(win,color,construction[i-1],construction[i],3)
             for i in range(len(construction[-1])):
-                self.drawPart(win,[construction[-2]]+construction[-1][i])
+                self.drawPart(win,[construction[-2]]+construction[-1][i],color)
         else:
             for i in range(1,len(construction)):
-                draw.line(win,(100,255,0),construction[i-1],construction[i],3)
+                draw.line(win,color,construction[i-1],construction[i],3)
+
+class Source:
+    def __init__(self,pos:Vector2,color:Tuple[int,int,int]=(255,255,255)):
+        self.pos:Vector2=pos
+        self.rays:List[Ray]=[]
+        self.color:Tuple[int,int,int]=color
+
+    def addRay(self,dir):
+        self.rays.append(Ray(self.pos,dir))
+
+    def fullConstruct(self,barriers):
+        for ray in self.rays:
+            ray.fullConstruct(barriers)
+
+    def draw(self,win):
+        for ray in self.rays:
+            ray.draw(win,self.color)
 
 class Game:
     def __init__(self):
@@ -222,9 +238,9 @@ class Game:
 
         self.mir=FlatRefractingSurface(Vector2(785,300),Vector2(800,100),3/2,1)
         self.screen=FlatMirror(Vector2(150,30),Vector2(103, 237))
-        self.ray0 = Ray(Vector2(200, 200), Vector2(3,0))
-        self.ray0.fullConstruct(Barrier.barriers)
-        print(self.ray0.construction)
+        self.source=Source(Vector2(200,200))
+        self.source.addRay(Vector2(3,0))
+        self.source.fullConstruct(Barrier.barriers)
         self.pointsMover=PointsMover(Skeleton.points)
 
     def UpdateStuff(self):
@@ -233,7 +249,7 @@ class Game:
         self.pointsMover.move(self.mPos,self.mPress)
         self.mir.build()
         self.screen.build()
-        self.ray0.fullConstruct(Barrier.barriers)
+        self.source.fullConstruct(Barrier.barriers)
 
 
         for e in event.get():
@@ -241,7 +257,7 @@ class Game:
                 self.stop()
 
     def DrawStuff(self):
-        self.ray0.draw(self.win)
+        self.source.draw(self.win)
         for barrier in Barrier.barriers:
             barrier.draw(self.win)
         for skeleton in Skeleton.skeletons:
