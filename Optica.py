@@ -2,7 +2,12 @@ from __future__ import annotations
 from typing import Tuple,List,Union,Dict
 from pygame import *
 import random as rd
-from math import pi
+from math import pi,asin,atan
+
+def getProjection(v1:Vector2,base:Vector2)->Vector2:
+    return base.normalize() * v1.dot(base) / base.magnitude()
+def rot90(v:Vector2,clock:bool=True)->Vector2:
+    return Vector2(-int(clock)*v.y,int(clock)*v.x)
 
 class PointsMover:
     def __init__(self,points:List[Vector2]):
@@ -59,7 +64,6 @@ class Intersection:
     def getImaginaryRays(self) -> list:
         return [ImaginaryRay(self.pos,-direction) for direction in self.wentDirs]
 
-
 class Barrier:
     barriers=[]
     def __init__(self,isCollectingImaginaryRays:bool=False):
@@ -87,8 +91,6 @@ class FlatBarrier(Barrier):
         self.alongNormal:Vector2=Vector2(0,0)
         self.skeleton:Skeleton=Skeleton({"start":self.start,"end":self.end})
         self.build()
-
-
 
     def build(self):
         self.along: Vector2 = self.end - self.start
@@ -180,6 +182,52 @@ class FlatScreen(FlatBarrier):
 
     def draw(self,win:Surface):
         draw.line(win,(255,255,255),self.start,self.end)
+
+class SphericalBarrier(Barrier):
+    def __init__(self,center:Vector2,mainPolus:Vector2,height:float,isCollectingImaginaryRays:bool=False):
+        super(SphericalBarrier, self).__init__(isCollectingImaginaryRays)
+        self.center:Vector2=center
+        self.mainPolus:Vector2=mainPolus
+        self.height:float=height
+        self.skeleton:Skeleton=Skeleton({"polus":self.mainPolus,"center":self.center})
+        self.normal:Vector2=Vector2(0,0)
+        self.mainRadius:Vector2=Vector2(0,0)
+        self.radius:float=0
+        self.startAngle:float=0
+        self.endAngle:float=0
+        self.build()
+    def build(self):
+        self.normal=(self.center-self.mainPolus).normalize()
+        self.mainRadius=self.mainPolus-self.center
+        self.radius=self.mainRadius.magnitude()
+        if self.mainRadius.magnitude_squared()<self.height**2/4:
+            self.edge =rot90(self.normal) * self.radius
+        else:
+            self.edge=-self.normal*(self.mainRadius.magnitude_squared()-self.height**2/4)**(1/2)+rot90(self.normal)*self.height/2
+
+        self.startAngle=asin(min(1,max([-1,-self.edge.y/self.radius])))
+        if self.edge.x<0:
+            self.startAngle=-pi-self.startAngle
+
+        self.endAngle=self.startAngle-2*asin(min(1,max([-1,self.height/2/self.radius])))
+
+
+    def getIntersections(self,startPos:Vector2,startDir:Vector2,source:any) -> List[Intersection]:
+        v1=startPos-self.center
+        v2=Vector2(-startDir.y,startDir.x)
+        d=getProjection(v1,v2)
+        if self.radius**2>=d.magnitude()**2:
+            intersection1=self.center+d-startDir.normalize()*(self.radius**2-d.magnitude()**2)**(1/2)
+            intersection2=self.center+d+startDir.normalize()*(self.radius**2-d.magnitude()**2)**(1/2)
+            intersects:List[Vector2]=[i for i in [intersection1,intersection2] if getProjection(i-self.center,rot90(self.normal)).magnitude()<self.height/2 and self.normal.dot(i-self.center)<0]
+            return self.getAngles(intersects)
+        return []
+
+    def getAngles(self,intersections:List[Vector2]) -> List[Intersection]:
+        return []
+
+    def draw(self,win:Surface):
+        draw.arc(win,(255,255,255),[*(self.center-Vector2(self.radius,self.radius)).xy,2*self.radius,2*self.radius],self.endAngle,self.startAngle)
 
 class Source:
     def __init__(self,pos:Vector2,color:Tuple[int,int,int]=(255,255,255)):
@@ -280,10 +328,11 @@ class Game:
 
         self.mir=FlatRefractingSurface(Vector2(785,300),Vector2(800,100),3/2,1)
         self.screen=FlatMirror(Vector2(150,30),Vector2(103, 237),True)
+        self.spherical=SphericalBarrier(Vector2(100,100),Vector2(200,100),100)
         self.source=Source(Vector2(200,450))
         self.source.addRay(Vector2(3, -0.5))
-        self.source.addRay(Vector2(3,0))
-        self.source.addRay(Vector2(3, 0.5))
+        #self.source.addRay(Vector2(3,0))
+        #self.source.addRay(Vector2(3, 0.5))
         self.source.fullConstruct(Barrier.barriers)
         Skeleton.points.append(self.source.pos)
         self.pointsMover=PointsMover(Skeleton.points)
@@ -294,6 +343,7 @@ class Game:
         self.pointsMover.move(self.mPos,self.mPress)
         self.mir.build()
         self.screen.build()
+        self.spherical.build()
         self.source.fullConstruct(Barrier.barriers)
 
 
