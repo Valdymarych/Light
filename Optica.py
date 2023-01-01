@@ -4,10 +4,11 @@ from pygame import *
 import random as rd
 from math import pi,asin,atan
 
-def getProjection(v1:Vector2,base:Vector2)->Vector2:
-    return base.normalize() * v1.dot(base) / base.magnitude()
 def rot90(v:Vector2,clock:bool=True)->Vector2:
     return Vector2(-int(clock)*v.y,int(clock)*v.x)
+
+def getProjection(v1:Vector2,base:Vector2)->Vector2:
+    return base.normalize() * v1.dot(base) / base.magnitude()
 
 class PointsMover:
     def __init__(self,points:List[Vector2]):
@@ -196,6 +197,7 @@ class SphericalBarrier(Barrier):
         self.startAngle:float=0
         self.endAngle:float=0
         self.build()
+
     def build(self):
         self.normal=(self.center-self.mainPolus).normalize()
         self.mainRadius=self.mainPolus-self.center
@@ -211,7 +213,6 @@ class SphericalBarrier(Barrier):
 
         self.endAngle=self.startAngle-2*asin(min(1,max([-1,self.height/2/self.radius])))
 
-
     def getIntersections(self,startPos:Vector2,startDir:Vector2,source:any) -> List[Intersection]:
         v1=startPos-self.center
         v2=Vector2(-startDir.y,startDir.x)
@@ -219,15 +220,30 @@ class SphericalBarrier(Barrier):
         if self.radius**2>=d.magnitude()**2:
             intersection1=self.center+d-startDir.normalize()*(self.radius**2-d.magnitude()**2)**(1/2)
             intersection2=self.center+d+startDir.normalize()*(self.radius**2-d.magnitude()**2)**(1/2)
-            intersects:List[Vector2]=[i for i in [intersection1,intersection2] if getProjection(i-self.center,rot90(self.normal)).magnitude()<self.height/2 and self.normal.dot(i-self.center)<0]
-            return self.getAngles(intersects)
+            intersects:List[Vector2]=[i for i in [intersection1,intersection2] if getProjection(i-self.center,rot90(self.normal)).magnitude()<self.height/2 and self.normal.dot(i-self.center)<0 and (i-startPos).dot(startDir)>0 and (i-startPos).magnitude()>0.01]
+            if len(intersects)>0:
+                intersect=intersects[0]
+                if len(intersects)==2:
+                    intersect=intersects[1] if (intersects[0]-startPos).magnitude()>(intersects[1]-startPos).magnitude() else intersects[0]
+                return self.getAngles(Intersection(intersect,startDir,[],self,(intersect-startPos).magnitude()))
         return []
 
-    def getAngles(self,intersections:List[Vector2]) -> List[Intersection]:
+    def getAngles(self,intersections:Intersection) -> List[Intersection]:
         return []
 
     def draw(self,win:Surface):
         draw.arc(win,(255,255,255),[*(self.center-Vector2(self.radius,self.radius)).xy,2*self.radius,2*self.radius],self.endAngle,self.startAngle)
+
+class SphericalMirror(SphericalBarrier):
+    def __init__(self,center:Vector2,mainPolus:Vector2,height:float,isCollectingImaginaryRays:bool=False,isReal:bool=False):
+        super(SphericalMirror, self).__init__(center,mainPolus,height,isCollectingImaginaryRays)
+        self.isReal=isReal
+
+    def getAngles(self,intersection:Intersection) -> List[Intersection]:
+        if self.isReal:
+            normal=(self.center-intersection.pos).normalize()
+            intersection.wentDirs=[intersection.cameDir-2*getProjection(intersection.cameDir,normal)]
+            return [intersection]
 
 class Source:
     def __init__(self,pos:Vector2,color:Tuple[int,int,int]=(255,255,255)):
@@ -236,6 +252,7 @@ class Source:
         self.imaginaryRays:List[ImaginaryRay]=[]
         self.color:Tuple[int,int,int]=color
         self.strokes=[]
+        self.skeleton=Skeleton({"pos":self.pos})
         for i in range(20):
             self.strokes.append(Vector2((2*rd.random()-1)*10).rotate(rd.random()*360))
 
@@ -268,6 +285,7 @@ class Ray:
     def construct(self,barriers:List[Barrier],tempSource:Intersection=None):
         intersection: Intersection=Intersection(self.startPos+self.startDir*32000,self.startDir,[],tempSource.barrier if tempSource else tempSource,32000)
         min_length: float=64000
+
         for barrier in barriers:
             intersectionsWithBarrier=barrier.getIntersections(self.startPos,self.startDir,tempSource)
             for i in intersectionsWithBarrier:
@@ -311,8 +329,6 @@ class ImaginaryRay:
     def draw(self,win:Surface,color:Tuple[int,int,int]):
         for i in range(self.strokeCount):
             draw.line(win,color,self.pos+(2*i+1)*self.direction*ImaginaryRay.strokeLength,self.pos+self.direction*(2*i+2)*ImaginaryRay.strokeLength,2)
-
-
 class Game:
     def __init__(self):
         self.WIDTH: int = 1200
@@ -326,15 +342,15 @@ class Game:
         self.mPos: Vector2 = Vector2(mouse.get_pos())
         self.mPress: Tuple[bool,bool,bool]=mouse.get_pressed()
 
-        self.mir=FlatRefractingSurface(Vector2(785,300),Vector2(800,100),3/2,1)
+        self.mir=FlatRefractingSurface(Vector2(785,300),Vector2(800,100),9,1)
         self.screen=FlatMirror(Vector2(150,30),Vector2(103, 237),True)
-        self.spherical=SphericalBarrier(Vector2(100,100),Vector2(200,100),100)
+        self.spherical=SphericalMirror(Vector2(100,100),Vector2(200,100),300,True,True)
+        self.refr=FlatRefractingSurface(Vector2(800,200),Vector2(800,100),9,1)
         self.source=Source(Vector2(200,450))
         self.source.addRay(Vector2(3, -0.5))
-        #self.source.addRay(Vector2(3,0))
-        #self.source.addRay(Vector2(3, 0.5))
+        self.source.addRay(Vector2(3,0))
+        self.source.addRay(Vector2(3, 0.5))
         self.source.fullConstruct(Barrier.barriers)
-        Skeleton.points.append(self.source.pos)
         self.pointsMover=PointsMover(Skeleton.points)
 
     def UpdateStuff(self):
@@ -344,12 +360,16 @@ class Game:
         self.mir.build()
         self.screen.build()
         self.spherical.build()
+        self.refr.build()
         self.source.fullConstruct(Barrier.barriers)
 
 
         for e in event.get():
             if e.type == QUIT:
                 self.stop()
+            # if e.type==KEYDOWN:
+            #     if e.key==K_s:
+            #         self.save()
 
     def DrawStuff(self):
         self.source.draw(self.win)
