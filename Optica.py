@@ -2,7 +2,8 @@ from __future__ import annotations
 from typing import Tuple,List,Union,Dict
 from pygame import *
 import random as rd
-from math import pi,asin,atan
+from math import pi,asin
+from pickle import dumps,loads
 
 def rot90(v:Vector2,clock:bool=True)->Vector2:
     return Vector2(-int(clock)*v.y,int(clock)*v.x)
@@ -52,7 +53,7 @@ class Skeleton:
 
     def draw(self,win:Surface):
         for point in self.points.values():
-            draw.circle(win,(255,255,0),point.xy,10)
+            draw.circle(win,(255,255,0),point.xy,5)
 
 class Intersection:
     def __init__(self,pos: Vector2,cameDir: Vector2,wentDirs: List[Vector2],barrier:Barrier,length:float):
@@ -81,6 +82,9 @@ class Barrier:
     def draw(self,win:Surface):
         pass
 
+    def getInitData(self):
+        return [self.isCollectingImaginaryRays]
+
 class FlatBarrier(Barrier):
     def __init__(self,start: Vector2,end: Vector2,isCollectingImaginaryRays:bool=False):
         super(FlatBarrier, self).__init__(isCollectingImaginaryRays)
@@ -96,6 +100,10 @@ class FlatBarrier(Barrier):
     def build(self):
         self.along: Vector2 = self.end - self.start
         self.length: float = self.along.magnitude()
+        if self.length==0:
+            self.skeleton.end.xy=(self.start+Vector2(0.1,0)).xy
+            self.build()
+            return
         self.normal: Vector2 = Vector2(-self.along.y, self.along.x) / self.length
         self.alongNormal: Vector2 = self.along.normalize()
 
@@ -121,6 +129,9 @@ class FlatBarrier(Barrier):
     def getAngle(self,intersection:Intersection)->List[Intersection]:
         pass
 
+    def getInitData(self):
+        return [self.start,self.end,self.isCollectingImaginaryRays]
+
 class FlatMirror(FlatBarrier):
     strokeStep=20
     stroke=Vector2(10,10)
@@ -144,6 +155,9 @@ class FlatMirror(FlatBarrier):
         draw.line(win,(255,255,255),self.start,self.end)
         for i in range(self.strokeCount):
             draw.line(win,(255,0,255),self.start+self.alongNormal*self.strokeStep*(i+0.5),self.start+self.alongNormal*(self.strokeStep*(i+0.5)+FlatMirror.stroke.x)+self.normal*FlatMirror.stroke.y)
+
+    def getInitData(self):
+        return [self.start,self.end,self.isCollectingImaginaryRays]
 
 class FlatRefractingSurface(FlatBarrier):
     def __init__(self,start: Vector2,end: Vector2,n0:float,n:float,isMirror:bool=False,isCollectingImaginaryRays:bool=False):
@@ -174,6 +188,9 @@ class FlatRefractingSurface(FlatBarrier):
     def draw(self,win):
         draw.line(win,(255,255,255),self.start,self.end)
 
+    def getInitData(self):
+        return [self.start,self.end,self.n0,self.n,self.isMirror,self.isCollectingImaginaryRays]
+
 class FlatScreen(FlatBarrier):
     def __init__(self,start:Vector2,end:Vector2):
         super(FlatScreen, self).__init__(start,end,False)
@@ -183,6 +200,9 @@ class FlatScreen(FlatBarrier):
 
     def draw(self,win:Surface):
         draw.line(win,(255,255,255),self.start,self.end)
+
+    def getInitData(self):
+        return [self.start,self.end]
 
 class SphericalBarrier(Barrier):
     def __init__(self,center:Vector2,mainPolus:Vector2,height:float,isCollectingImaginaryRays:bool=False):
@@ -233,6 +253,8 @@ class SphericalBarrier(Barrier):
 
     def draw(self,win:Surface):
         draw.arc(win,(255,255,255),[*(self.center-Vector2(self.radius,self.radius)).xy,2*self.radius,2*self.radius],self.endAngle,self.startAngle)
+    def getInitData(self):
+        return [self.center,self.mainPolus,self.height,self.isCollectingImaginaryRays]
 
 class SphericalMirror(SphericalBarrier):
     def __init__(self,center:Vector2,mainPolus:Vector2,height:float,isCollectingImaginaryRays:bool=False,isReal:bool=False):
@@ -244,17 +266,23 @@ class SphericalMirror(SphericalBarrier):
             normal=(self.center-intersection.pos).normalize()
             intersection.wentDirs=[intersection.cameDir-2*getProjection(intersection.cameDir,normal)]
             return [intersection]
+    def getInitData(self):
+        return [self.center,self.mainPolus,self.height,self.isCollectingImaginaryRays,self.isReal]
 
 class Source:
-    def __init__(self,pos:Vector2,color:Tuple[int,int,int]=(255,255,255)):
+    sources=[]
+    def __init__(self,pos:Vector2,color:Tuple[int,int,int]=(255,255,255),rayDirs:List[Vector2]=[]):
         self.pos:Vector2=pos
         self.rays:List[Ray]=[]
+        for direction in rayDirs:
+            self.addRay(direction)
         self.imaginaryRays:List[ImaginaryRay]=[]
         self.color:Tuple[int,int,int]=color
         self.strokes=[]
         self.skeleton=Skeleton({"pos":self.pos})
         for i in range(20):
             self.strokes.append(Vector2((2*rd.random()-1)*10).rotate(rd.random()*360))
+        Source.sources.append(self)
 
     def addRay(self,dir):
         self.rays.append(Ray(self.pos,dir,self))
@@ -274,17 +302,23 @@ class Source:
             imaginaryRay.draw(win,self.color)
         for stroke in self.strokes:
             draw.line(win,self.color,self.pos,self.pos+stroke,2)
+    def getInitData(self):
+        return [self.pos,self.color,[ray.startDir for ray in self.rays]]
 
 class Ray:
+    maxDepth=50
+    minLength=4000
     def __init__(self, pos: Vector2, direction: Vector2, source:Source):
         self.startPos: Vector2 = pos
         self.startDir: Vector2 = direction/direction.length()
         self.construction:List[Union[Tuple,Vector2]]=[Vector2(0,0)]
         self.source:Source=source
 
-    def construct(self,barriers:List[Barrier],tempSource:Intersection=None):
-        intersection: Intersection=Intersection(self.startPos+self.startDir*32000,self.startDir,[],tempSource.barrier if tempSource else tempSource,32000)
-        min_length: float=64000
+    def construct(self,barriers:List[Barrier],depth:int,tempSource:Intersection=None):
+        intersection: Intersection=Intersection(self.startPos+self.startDir*3000,self.startDir,[],tempSource.barrier if tempSource else tempSource,32000)
+        if depth>Ray.maxDepth:
+            return self.startPos,intersection.pos
+        min_length: float=Ray.minLength
 
         for barrier in barriers:
             intersectionsWithBarrier=barrier.getIntersections(self.startPos,self.startDir,tempSource)
@@ -300,11 +334,11 @@ class Ray:
         if len(intersection.wentDirs)==0:
             return self.startPos,intersection.pos
         if len(intersection.wentDirs)==1:
-            return self.startPos,*Ray(intersection.pos,intersection.wentDirs[0],self.source).construct(barriers,intersection)
+            return self.startPos,*Ray(intersection.pos,intersection.wentDirs[0],self.source).construct(barriers,depth+1,intersection)
         if len(intersection.wentDirs)>1:
-            return self.startPos,[list(Ray(intersection.pos,wentDir,self.source).construct(barriers,intersection)) for wentDir in intersection.wentDirs]
+            return self.startPos,[list(Ray(intersection.pos,wentDir,self.source).construct(barriers,depth+1,intersection)) for wentDir in intersection.wentDirs]
     def fullConstruct(self,barriers:List[Barrier]):
-        self.construction=list(self.construct(barriers))
+        self.construction=list(self.construct(barriers,0))
 
     def draw(self,win,color:Tuple[int,int,int]=(255,255,255)):
         self.drawPart(win,self.construction,color)
@@ -329,11 +363,12 @@ class ImaginaryRay:
     def draw(self,win:Surface,color:Tuple[int,int,int]):
         for i in range(self.strokeCount):
             draw.line(win,color,self.pos+(2*i+1)*self.direction*ImaginaryRay.strokeLength,self.pos+self.direction*(2*i+2)*ImaginaryRay.strokeLength,2)
+
 class Game:
     def __init__(self):
         self.WIDTH: int = 1200
         self.HEIGHT: int = 500
-        self.FPS: int = 40
+        self.FPS: int = 60
         self.isRunning: bool = True
 
         self.win: Surface = display.set_mode((self.WIDTH, self.HEIGHT))
@@ -342,10 +377,10 @@ class Game:
         self.mPos: Vector2 = Vector2(mouse.get_pos())
         self.mPress: Tuple[bool,bool,bool]=mouse.get_pressed()
 
-        self.mir=FlatRefractingSurface(Vector2(785,300),Vector2(800,100),9,1)
+        self.mir=FlatRefractingSurface(Vector2(785,300),Vector2(800,100),3/2,1)
         self.screen=FlatMirror(Vector2(150,30),Vector2(103, 237),True)
         self.spherical=SphericalMirror(Vector2(100,100),Vector2(200,100),300,True,True)
-        self.refr=FlatRefractingSurface(Vector2(800,200),Vector2(800,100),9,1)
+        self.refr=FlatRefractingSurface(Vector2(800,200),Vector2(900,150),3/2,1)
         self.source=Source(Vector2(200,450))
         self.source.addRay(Vector2(3, -0.5))
         self.source.addRay(Vector2(3,0))
@@ -357,22 +392,23 @@ class Game:
         self.mPos = Vector2(mouse.get_pos())
         self.mPress = mouse.get_pressed(3)
         self.pointsMover.move(self.mPos,self.mPress)
-        self.mir.build()
-        self.screen.build()
-        self.spherical.build()
-        self.refr.build()
-        self.source.fullConstruct(Barrier.barriers)
-
+        for barrier in Barrier.barriers:
+            barrier.build()
+        for source in Source.sources:
+            source.fullConstruct(Barrier.barriers)
 
         for e in event.get():
             if e.type == QUIT:
                 self.stop()
-            # if e.type==KEYDOWN:
-            #     if e.key==K_s:
-            #         self.save()
+            if e.type==KEYDOWN:
+                if e.key==K_s:
+                    self.save()
+                if e.key==K_l:
+                    self.load()
 
     def DrawStuff(self):
-        self.source.draw(self.win)
+        for source in Source.sources:
+            source.draw(self.win)
         for barrier in Barrier.barriers:
             barrier.draw(self.win)
         for skeleton in Skeleton.skeletons:
@@ -385,6 +421,31 @@ class Game:
         display.update()
         self.clock.tick(self.FPS)
         display.set_caption(str(round(self.clock.get_fps())))
+
+    def save(self):
+        objs=Barrier.barriers+Source.sources
+        f=open("ducks","wb+")
+        f.write(dumps([[obj.__class__,*obj.getInitData()] for obj in objs]))
+        f.close()
+
+    def load(self):
+        try:
+            f=open("ducks","rb")
+            objs=loads(f.read())
+            f.close()
+            for obj in objs:
+                obj[0](*obj[1:])
+            Barrier.barriers.clear()
+            Source.sources.clear()
+            self.pointsMover.points.clear()
+            Skeleton.skeletons.clear()
+        except FileNotFoundError:
+            f=open("ducks","w+")
+            f.close()
+            print("file empty")
+        except EOFError:
+            print("file empty or corrupted")
+
 
     def run(self):
         while self.isRunning:
