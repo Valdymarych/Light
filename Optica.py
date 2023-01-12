@@ -4,6 +4,7 @@ from pygame import *
 import random as rd
 from math import pi,asin
 from pickle import dumps,loads
+import numpy as np
 
 def rot90(v:Vector2,clock:bool=True)->Vector2:
     return Vector2(-int(clock)*v.y,int(clock)*v.x)
@@ -234,6 +235,23 @@ class SphericalBarrier(Barrier):
         self.endAngle=self.startAngle-2*asin(min(1,max([-1,self.height/2/self.radius])))
 
     def getIntersections(self,startPos:Vector2,startDir:Vector2,source:any) -> List[Intersection]:
+        return []
+
+    def getAngles(self,intersection:Intersection) -> List[Intersection]:
+        return []
+
+    def draw(self,win:Surface):
+        draw.arc(win,(255,255,255),[*(self.center-Vector2(self.radius,self.radius)).xy,2*self.radius,2*self.radius],self.endAngle,self.startAngle)
+
+    def getInitData(self):
+        return [self.center,self.mainPolus,self.height,self.isCollectingImaginaryRays]
+
+class SphericalBarrierReal(SphericalBarrier):
+    def __init__(self,center:Vector2,mainPolus:Vector2,height:float,isCollectingImaginaryRays:bool=False):
+        super(SphericalBarrierReal, self).__init__(center,mainPolus,height,isCollectingImaginaryRays)
+        self.build()
+
+    def getIntersections(self,startPos:Vector2,startDir:Vector2,source:any) -> List[Intersection]:
         v1=startPos-self.center
         v2=Vector2(-startDir.y,startDir.x)
         d=getProjection(v1,v2)
@@ -248,27 +266,130 @@ class SphericalBarrier(Barrier):
                 return self.getAngles(Intersection(intersect,startDir,[],self,(intersect-startPos).magnitude()))
         return []
 
-    def getAngles(self,intersections:Intersection) -> List[Intersection]:
+    def getAngles(self,intersection:Intersection) -> List[Intersection]:
         return []
 
     def draw(self,win:Surface):
         draw.arc(win,(255,255,255),[*(self.center-Vector2(self.radius,self.radius)).xy,2*self.radius,2*self.radius],self.endAngle,self.startAngle)
+
     def getInitData(self):
         return [self.center,self.mainPolus,self.height,self.isCollectingImaginaryRays]
 
-class SphericalMirror(SphericalBarrier):
-    def __init__(self,center:Vector2,mainPolus:Vector2,height:float,isCollectingImaginaryRays:bool=False,isReal:bool=False):
-        super(SphericalMirror, self).__init__(center,mainPolus,height,isCollectingImaginaryRays)
-        self.isReal=isReal
+class SphericalBarrierUnReal(SphericalBarrier):
+    def __init__(self,center:Vector2,mainPolus:Vector2,height:float,isCollectingImaginaryRays:bool=False):
+        super(SphericalBarrierUnReal, self).__init__(center,mainPolus,height,isCollectingImaginaryRays)
+        self.build()
+
+    def getIntersections(self,startPos:Vector2,startDir:Vector2,source:any) -> List[Intersection]:
+        along = rot90(self.normal) * min(2*self.radius,self.height)
+        start=self.mainPolus-along/2
+
+        x1, y1 = start.xy
+        dx1, dy1 = along.xy
+        x2, y2 = startPos.xy
+        dx2, dy2 = (startDir*32000).xy
+
+        if source and source.barrier == self:
+            return []
+
+        if dy1 * dx2 != dx1 * dy2:
+            s = (y2 * dx2 - y1 * dx2 + x1 * dy2 - x2 * dy2) / (dy1 * dx2 - dx1 * dy2)
+            if abs(dx2) > abs(dy2):
+                t = (x1 - x2 + s * dx1) / dx2
+            else:
+                t = (y1 - y2 + s * dy1) / dy2
+            if 0 < s < 1 and 0 < t < 1:
+                return self.getAngles(Intersection(start + along * s, startDir, [], self, t*32000))
+        return []
 
     def getAngles(self,intersection:Intersection) -> List[Intersection]:
-        if self.isReal:
-            normal=(self.center-intersection.pos).normalize()
-            intersection.wentDirs=[intersection.cameDir-2*getProjection(intersection.cameDir,normal)]
-            return [intersection]
-    def getInitData(self):
-        return [self.center,self.mainPolus,self.height,self.isCollectingImaginaryRays,self.isReal]
+        return []
 
+    def draw(self,win:Surface):
+        draw.arc(win,(255,255,255),[*(self.center-Vector2(self.radius,self.radius)).xy,2*self.radius,2*self.radius],self.endAngle,self.startAngle)
+
+    def getInitData(self):
+        return [self.center,self.mainPolus,self.height,self.isCollectingImaginaryRays]
+
+class SphericalMirrorReal(SphericalBarrierReal):
+    strokeStep=20
+    stroke=Vector2(10,10)
+    def __init__(self,center:Vector2,mainPolus:Vector2,height:float,isCollectingImaginaryRays:bool=False,isConcave:bool=True):
+        super(SphericalMirrorReal, self).__init__(center,mainPolus,height,isCollectingImaginaryRays)
+        self.isConcave:bool=isConcave
+        self.strokeCount:int=0
+        self.strokeStep:int=0
+
+    def build(self):
+        super(SphericalMirrorReal, self).build()
+        length=2 * asin(min(1, max([-1, self.height / 2 / self.radius])))*self.radius
+        self.strokeCount=int(length/SphericalMirrorReal.strokeStep)+1
+        self.strokeStep=length/self.strokeCount/self.radius
+
+    def getAngles(self,intersection:Intersection) -> List[Intersection]:
+
+        normal = (self.center - intersection.pos).normalize()
+        if normal.dot(intersection.cameDir) * (int(self.isConcave) * 2 - 1) < 0:
+            intersection.wentDirs=[intersection.cameDir-2*getProjection(intersection.cameDir,normal)]
+        return [intersection]
+
+    def getInitData(self):
+        return [self.center,self.mainPolus,self.height,self.isCollectingImaginaryRays,self.isConcave]
+
+    def draw(self,win:Surface):
+        super(SphericalMirrorReal, self).draw(win)
+        for i in range(self.strokeCount):
+            start=self.center+Vector2(self.radius,0).rotate_rad(-self.startAngle+(i+0.5)*self.strokeStep)
+            draw.line(win,(255,0,0),start,start+(int(self.isConcave)*2-1)*SphericalMirrorReal.stroke.rotate_rad(-self.startAngle+(i+0.5)*self.strokeStep),2)
+
+class SphericalMirrorUnReal(SphericalBarrierUnReal):
+    strokeStep=20
+    stroke=Vector2(10,10)
+    def __init__(self,center:Vector2,mainPolus:Vector2,height:float,isCollectingImaginaryRays:bool=False,isConcave:bool=True):
+        super(SphericalMirrorUnReal, self).__init__(center,mainPolus,height,isCollectingImaginaryRays)
+        self.isConcave:bool=isConcave
+        self.strokeCount:int=0
+        self.strokeStep:int=0
+
+    def build(self):
+        super(SphericalMirrorUnReal, self).build()
+        length=2 * asin(min(1, max([-1, self.height / 2 / self.radius])))*self.radius
+        self.strokeCount=int(length/SphericalMirrorReal.strokeStep)+1
+        self.strokeStep=length/self.strokeCount/self.radius
+
+
+    def getAngles(self,intersection:Intersection) -> List[Intersection]:
+        normal = (self.center - intersection.pos).normalize()
+        if normal.dot(intersection.cameDir) * (int(self.isConcave) * 2 - 1) < 0:
+            inters=intersection.pos-self.mainPolus
+            intersx=-getProjection(inters,self.normal)
+            dirx=-getProjection(intersection.cameDir,self.normal)
+            diry=getProjection(intersection.cameDir,rot90(self.normal))
+            if dirx.x==0:
+                dirx.x=0.0001
+            if dirx.x>0:
+                return []
+            newInters=intersection.pos-intersection.cameDir*intersx.x/dirx.x
+
+            focus=self.mainRadius/2+self.center
+            secondFocus=focus-diry*self.mainRadius.x/2/dirx.x
+            intersection.wentDirs=[(int(self.isConcave)*2-1)*(secondFocus-newInters).normalize()]
+            intersection.pos=newInters
+
+
+        return [intersection]
+
+    def getInitData(self):
+        return [self.center,self.mainPolus,self.height,self.isCollectingImaginaryRays,self.isConcave]
+
+    def draw(self,win:Surface):
+        super(SphericalMirrorUnReal, self).draw(win)
+        for i in range(self.strokeCount):
+            start=self.center+Vector2(self.radius,0).rotate_rad(-self.startAngle+(i+0.5)*self.strokeStep)
+            draw.line(win,(255,0,0),start,start+(int(self.isConcave)*2-1)*SphericalMirrorUnReal.stroke.rotate_rad(-self.startAngle+(i+0.5)*self.strokeStep),2)
+        along = rot90(self.normal) * min(2*self.radius,self.height)
+        start=self.mainPolus-along/2
+        draw.line(win,(255,255,255),start,start+along)
 class Source:
     sources=[]
     def __init__(self,pos:Vector2,color:Tuple[int,int,int]=(255,255,255),rayDirs:List[Vector2]=[]):
@@ -379,7 +500,7 @@ class Game:
 
         self.mir=FlatRefractingSurface(Vector2(785,300),Vector2(800,100),3/2,1)
         self.screen=FlatMirror(Vector2(150,30),Vector2(103, 237),True)
-        self.spherical=SphericalMirror(Vector2(100,100),Vector2(200,100),300,True,True)
+        self.spherical=SphericalMirrorUnReal(Vector2(100,100),Vector2(200,100),500,True,True)
         self.refr=FlatRefractingSurface(Vector2(800,200),Vector2(900,150),3/2,1)
         self.source=Source(Vector2(200,450))
         self.source.addRay(Vector2(3, -0.5))
@@ -415,6 +536,7 @@ class Game:
             skeleton.draw(self.win)
 
     def WindowUpdateStuff(self):
+
         self.UpdateStuff()
         self.win.fill((0, 0, 0))
         self.DrawStuff()
@@ -433,12 +555,13 @@ class Game:
             f=open("ducks","rb")
             objs=loads(f.read())
             f.close()
-            for obj in objs:
-                obj[0](*obj[1:])
             Barrier.barriers.clear()
             Source.sources.clear()
             self.pointsMover.points.clear()
             Skeleton.skeletons.clear()
+            for obj in objs:
+                obj[0](*obj[1:])
+
         except FileNotFoundError:
             f=open("ducks","w+")
             f.close()
