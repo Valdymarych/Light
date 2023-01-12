@@ -390,6 +390,45 @@ class SphericalMirrorUnReal(SphericalBarrierUnReal):
         along = rot90(self.normal) * min(2*self.radius,self.height)
         start=self.mainPolus-along/2
         draw.line(win,(255,255,255),start,start+along)
+
+class SphericalRefractingSurfaceReal(SphericalBarrierReal):
+    def __init__(self,center:Vector2,mainPolus:Vector2,height:float,n0:float,n:float,isCollectingImaginaryRays:bool=False):
+        super(SphericalRefractingSurfaceReal, self).__init__(center,mainPolus,height,isCollectingImaginaryRays)
+        self.n:float=n
+        self.n0:float=n0
+
+    def getIntersections(self,startPos:Vector2,startDir:Vector2,source:any) -> List[Intersection]:
+        if source and source.barrier==self:
+            return []
+        return super(SphericalRefractingSurfaceReal, self).getIntersections(startPos,startDir,source)
+
+    def getAngles(self,intersection:Intersection) -> List[Intersection]:
+        normal=(self.center-intersection.pos).normalize()
+        alongNormal=rot90(normal)
+        x = alongNormal.dot(intersection.cameDir)
+
+        direction = float(alongNormal.cross(intersection.cameDir))
+        n = self.n / self.n0
+        if direction < 0:
+            n = self.n0 / self.n
+
+        nextDirs = []
+        if abs(n * x)>1:  # sin B > 1
+            #nextDir=self.alongNormal*x/abs(x)
+            return [Intersection(intersection.pos, intersection.cameDir, nextDirs, intersection.barrier,
+                                 intersection.length)]
+        else:
+            y = n * x * ((1 - x ** 2) / (1 - (x*n) ** 2)) ** 0.5
+            nextDir = intersection.cameDir - alongNormal * (x - y)
+            nextDir.normalize()
+            nextDirs.append(nextDir)
+            return [Intersection(intersection.pos, intersection.cameDir, nextDirs, intersection.barrier,
+                                 intersection.length)]
+
+
+    def getInitData(self):
+        return [self.center,self.mainPolus,self.height,self.n0,self.n,self.isCollectingImaginaryRays]
+
 class Source:
     sources=[]
     def __init__(self,pos:Vector2,color:Tuple[int,int,int]=(255,255,255),rayDirs:List[Vector2]=[]):
@@ -500,7 +539,7 @@ class Game:
 
         self.mir=FlatRefractingSurface(Vector2(785,300),Vector2(800,100),3/2,1)
         self.screen=FlatMirror(Vector2(150,30),Vector2(103, 237),True)
-        self.spherical=SphericalMirrorUnReal(Vector2(100,100),Vector2(200,100),500,True,True)
+        self.spherical=SphericalRefractingSurfaceReal(Vector2(100,100),Vector2(200,100),500,1,3/2)
         self.refr=FlatRefractingSurface(Vector2(800,200),Vector2(900,150),3/2,1)
         self.source=Source(Vector2(200,450))
         self.source.addRay(Vector2(3, -0.5))
