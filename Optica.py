@@ -429,6 +429,72 @@ class SphericalRefractingSurfaceReal(SphericalBarrierReal):
     def getInitData(self):
         return [self.center,self.mainPolus,self.height,self.n0,self.n,self.isCollectingImaginaryRays]
 
+class Lens(Barrier):
+    def __init__(self,center:Vector2,focus:Vector2,height:float,isConverging=True,isCollectingImaginaryRays:bool=False):
+        super(Lens, self).__init__(isCollectingImaginaryRays)
+        self.center=center
+        self.focus=focus
+        self.height=height
+        self.normal:Vector2=Vector2(0,0)
+        self.alongNormal:Vector2=Vector2(0,0)
+        self.start:Vector2=Vector2(0,0)
+        self.end:Vector2=Vector2(0,0)
+        self.along:Vector2=Vector2(0,0)
+        self.focal:Vector2=Vector2(0,0)
+        self.isConverging=isConverging
+        self.build()
+        self.skeleton: Skeleton = Skeleton({"center": self.center, "focus": self.focus})
+
+    def build(self):
+        self.focal=self.focus-self.center
+        if self.focal.magnitude_squared()==0:
+            self.focal=Vector2(0.1,0)
+            self.skeleton.focus.xy=self.center+self.focal.xy
+            print(self.focus)
+        self.normal=self.focal.normalize()
+        self.alongNormal=rot90(self.normal)
+        self.start=self.center-self.alongNormal*self.height/2
+        self.end=self.start+self.alongNormal*self.height
+        self.along=self.end-self.start
+
+
+    def getIntersections(self,startPos:Vector2,startDir:Vector2,source:any) -> List[Intersection]:
+        if source and source.barrier==self:
+            return []
+        x1,y1=self.start.xy
+        dx1,dy1=self.along.xy
+        x2,y2=startPos.xy
+        dx2,dy2=startDir.xy
+
+        if dy1*dx2!=dx1*dy2:
+            s=(y2*dx2-y1*dx2+x1*dy2-x2*dy2)/(dy1*dx2-dx1*dy2)
+            if abs(dx2)>abs(dy2):
+                t=(x1-x2+s*dx1)/dx2
+            else:
+                t=(y1-y2+s*dy1)/dy2
+            if 0<s<1 and 0<t:
+                inter=self.start + self.along * s
+                if getProjection(startDir.normalize(),self.normal).x==0:
+                    focus=self.center+startDir*abs(self.focal.y/getProjection(startDir.normalize(),self.normal).y)
+                else:
+                    focus=self.center+startDir*abs(self.focal.x/getProjection(startDir.normalize(),self.normal).x)
+
+                wentDir=(focus-inter).normalize()
+                if not self.isConverging:
+                    wentDir=-(self.center*2-focus-inter).normalize()
+                #if startDir.dot(self.focal)<0:
+                 #   wentDir*=-1
+                return [Intersection(inter,startDir,[wentDir],self,t)]
+
+        return []
+
+    def draw(self,win:Surface):
+        draw.line(win,(255,255,255),self.start,self.end)
+
+
+    def getInitData(self):
+        return [self.center,self.focus,self.height,self.isConverging,self.isCollectingImaginaryRays]
+
 class Source:
     sources=[]
     def __init__(self,pos:Vector2,color:Tuple[int,int,int]=(255,255,255),rayDirs:List[Vector2]=[]):
@@ -541,6 +607,7 @@ class Game:
         self.screen=FlatMirror(Vector2(150,30),Vector2(103, 237),True)
         self.spherical=SphericalRefractingSurfaceReal(Vector2(100,100),Vector2(200,100),500,1,3/2)
         self.refr=FlatRefractingSurface(Vector2(800,200),Vector2(900,150),3/2,1)
+        self.lens=Lens(Vector2(600,250),Vector2(700,250),300,False)
         self.source=Source(Vector2(200,450))
         self.source.addRay(Vector2(3, -0.5))
         self.source.addRay(Vector2(3,0))
