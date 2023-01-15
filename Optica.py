@@ -4,7 +4,10 @@ from pygame import *
 import random as rd
 from math import pi,asin
 from pickle import dumps,loads
-import numpy as np
+from time import time as tm
+
+init()
+font.init()
 
 def rot90(v:Vector2,clock:bool=True)->Vector2:
     return Vector2(-int(clock)*v.y,int(clock)*v.x)
@@ -13,48 +16,76 @@ def getProjection(v1:Vector2,base:Vector2)->Vector2:
     return base.normalize() * v1.dot(base) / base.magnitude()
 
 class PointsMover:
-    def __init__(self,points:List[Vector2]):
+    def __init__(self,points:List[Point]):
         self.points=points
-        self.movePoint:Vector2=None
+        self.movedPoint:Point=None
 
     def move(self,mpos:Vector2,mpess:Tuple[bool,bool,bool]):
         if mpess[0]:
-            if not self.movePoint:
+            if not self.movedPoint:
                 minDistance: float = 30 ** 2 + 1
-                self.movePoint = None
+                self.movedPoint = None
                 for point in self.points:
-                    distance = (point - mpos).magnitude_squared()
+                    distance = (point.pos - mpos).magnitude_squared()
                     if distance < minDistance:
                         minDistance = distance
-                        self.movePoint = point
-            if self.movePoint:
-                self.movePoint.xy = mpos.xy
+                        self.movedPoint = point
+            if self.movedPoint:
+                PointsMover.movePoint(self.movedPoint,mpos)
         else:
-            self.movePoint=None
+            self.movedPoint=None
+
+    def setPoints(self,points:List[Point]):
+        self.points=points
+
+    @staticmethod
+    def movePoint(point:Point,mPos:Vector2):
+        dPos=Vector2(mPos.x-round(point.pos.x),mPos.y-round(point.pos.y))
+        point.pos.xy = mPos
+        if len(point.skeleton.points)==1:
+            for dependent in point.skeleton.dependents:
+                PointsMover.moveSkeleton(dependent,dPos)
+
+    @staticmethod
+    def moveSkeleton(skeleton:Skeleton,dPos:Vector2):
+        for point in skeleton.points:
+            point.pos.xy+=dPos
+        for dependent in skeleton.dependents:
+            PointsMover.moveSkeleton(dependent,dPos)
+
+class Point:
+    def __init__(self,name:str,pos:Vector2,skeleton:Skeleton):
+        self.name=name
+        self.pos=pos
+        self.skeleton=skeleton
+    def __str__(self):
+        return self.name+str(self.skeleton.body)
 
 class Skeleton:
-    skeletons=[]
-    points=[]
-    def __init__(self,points: Dict[str,Vector2]):
-        self.points=points
-        Skeleton.points.extend(self.points.values())
-        Skeleton.skeletons.append(self)
+    def __init__(self,points: Dict[str,Vector2],body:any):
+        self.points=[Point(name,pos,self) for name,pos in points.items()]
 
-    def __getattr__(self, item:str):
-        return self.points.get(item)
+        self.body=body
+        self.dependents:List[Skeleton]=[]
 
-    def __setattr__(self, key:str, value:any):
-        if key=="points":
-            super().__setattr__(key, value)
-        else:
-            if key in self.points.keys():
-                raise UserWarning("setter error")
-            else:
-                super().__setattr__(key, value)
+    def addDependent(self,other:Skeleton):
+        self.dependents.append(other)
 
     def draw(self,win:Surface):
-        for point in self.points.values():
-            draw.circle(win,(255,255,0),point.xy,5)
+        for point in self.points:
+            draw.circle(win,(255,255,0),point.pos,5)
+        for dependent in self.dependents:
+            dependent.draw(win)
+
+    def getPoints(self) -> Tuple[List[Point],List[Point]]:
+        pointsDependent=[]
+        points=[]
+        for dependent in self.dependents:
+            p=dependent.getPoints()
+            points.extend(p[1])
+            pointsDependent.extend(p[0])
+        pointsDependent.extend(points)
+        return (pointsDependent,self.points)
 
 class Intersection:
     def __init__(self,pos: Vector2,cameDir: Vector2,wentDirs: List[Vector2],barrier:Barrier,length:float):
@@ -72,7 +103,7 @@ class Barrier:
     def __init__(self,isCollectingImaginaryRays:bool=False):
         self.isCollectingImaginaryRays=isCollectingImaginaryRays
         Barrier.barriers.append(self)
-        self.skeleton:Skeleton=Skeleton({})
+        self.skeleton:Skeleton=Skeleton({},self)
 
     def build(self):  # sceleton -> points -> other
         pass
@@ -86,23 +117,31 @@ class Barrier:
     def getInitData(self):
         return [self.isCollectingImaginaryRays]
 
+    @staticmethod
+    def getIcoSurface(size:int) -> Surface:
+        surf=Surface((size, size))
+        return surf
+
 class FlatBarrier(Barrier):
     def __init__(self,start: Vector2,end: Vector2,isCollectingImaginaryRays:bool=False):
         super(FlatBarrier, self).__init__(isCollectingImaginaryRays)
         self.start=start
         self.end=end
-        self.along:Vector2=Vector2(0,0)
+        self.along:Vector2=self.end-self.start
+        self.center=self.start+self.along/2
         self.length:float=0
         self.normal:Vector2=Vector2(0,0)
         self.alongNormal:Vector2=Vector2(0,0)
-        self.skeleton:Skeleton=Skeleton({"start":self.start,"end":self.end})
+        self.skeleton:Skeleton=Skeleton({"center":self.center},self)
+        self.skeleton.addDependent(Skeleton({"start":self.start},self))
         self.build()
 
     def build(self):
+        self.end=2*self.center-self.start
         self.along: Vector2 = self.end - self.start
         self.length: float = self.along.magnitude()
         if self.length==0:
-            self.skeleton.end.xy=(self.start+Vector2(0.1,0)).xy
+            self.center.xy=(self.start+Vector2(0.1,0)).xy
             self.build()
             return
         self.normal: Vector2 = Vector2(-self.along.y, self.along.x) / self.length
@@ -211,7 +250,8 @@ class SphericalBarrier(Barrier):
         self.center:Vector2=center
         self.mainPolus:Vector2=mainPolus
         self.height:float=height
-        self.skeleton:Skeleton=Skeleton({"polus":self.mainPolus,"center":self.center})
+        self.skeleton:Skeleton=Skeleton({"center":self.center},self)
+        self.skeleton.addDependent(Skeleton({"polus":self.mainPolus},self))
         self.normal:Vector2=Vector2(0,0)
         self.mainRadius:Vector2=Vector2(0,0)
         self.radius:float=0
@@ -220,8 +260,11 @@ class SphericalBarrier(Barrier):
         self.build()
 
     def build(self):
-        self.normal=(self.center-self.mainPolus).normalize()
-        self.mainRadius=self.mainPolus-self.center
+        self.mainRadius = self.mainPolus - self.center
+        if self.mainRadius.magnitude()==0:
+            self.mainPolus+=Vector2(0.1,0)
+            self.mainRadius=Vector2(0.1,0)
+        self.normal=-self.mainRadius.normalize()
         self.radius=self.mainRadius.magnitude()
         if self.mainRadius.magnitude_squared()<self.height**2/4:
             self.edge =rot90(self.normal) * self.radius
@@ -430,6 +473,7 @@ class SphericalRefractingSurfaceReal(SphericalBarrierReal):
         return [self.center,self.mainPolus,self.height,self.n0,self.n,self.isCollectingImaginaryRays]
 
 class Lens(Barrier):
+    stroke=Vector2(10,30)
     def __init__(self,center:Vector2,focus:Vector2,height:float,isConverging=True,isCollectingImaginaryRays:bool=False):
         super(Lens, self).__init__(isCollectingImaginaryRays)
         self.center=center
@@ -442,15 +486,16 @@ class Lens(Barrier):
         self.along:Vector2=Vector2(0,0)
         self.focal:Vector2=Vector2(0,0)
         self.isConverging=isConverging
+        self.stroke=Vector2(Lens.stroke.x,(2*int(self.isConverging)-1)*Lens.stroke.y)
         self.build()
-        self.skeleton: Skeleton = Skeleton({"center": self.center, "focus": self.focus})
+        self.skeleton: Skeleton = Skeleton({"center": self.center},self)
+        self.skeleton.addDependent(Skeleton({"focus": self.focus},self))
 
     def build(self):
         self.focal=self.focus-self.center
         if self.focal.magnitude_squared()==0:
             self.focal=Vector2(0.1,0)
-            self.skeleton.focus.xy=self.center+self.focal.xy
-            print(self.focus)
+            self.focus.xy=self.center+self.focal.xy
         self.normal=self.focal.normalize()
         self.alongNormal=rot90(self.normal)
         self.start=self.center-self.alongNormal*self.height/2
@@ -482,18 +527,42 @@ class Lens(Barrier):
                 wentDir=(focus-inter).normalize()
                 if not self.isConverging:
                     wentDir=-(self.center*2-focus-inter).normalize()
-                #if startDir.dot(self.focal)<0:
-                 #   wentDir*=-1
                 return [Intersection(inter,startDir,[wentDir],self,t)]
 
         return []
 
     def draw(self,win:Surface):
-        draw.line(win,(255,255,255),self.start,self.end)
 
+        draw.line(win,(255,255,255),self.start,self.end)
+        draw.line(win,(255,255,255),self.start,self.start+self.normal*self.stroke.x+self.alongNormal*self.stroke.y)
+        draw.line(win, (255, 255, 255), self.start,self.start - self.normal * self.stroke.x + self.alongNormal * self.stroke.y)
+        draw.line(win,(255,255,255),self.end,self.end+self.normal*self.stroke.x-self.alongNormal*self.stroke.y)
+        draw.line(win, (255, 255, 255), self.end,self.end - self.normal * self.stroke.x - self.alongNormal * self.stroke.y)
 
     def getInitData(self):
         return [self.center,self.focus,self.height,self.isConverging,self.isCollectingImaginaryRays]
+
+    @staticmethod
+    def getIcoSurface(size:int,isConverging:bool=True) -> Surface:
+        h=int(size*0.1)
+        if not isConverging:
+            h=int(size*0.25)
+        w=int(size*0.5)
+        surf=Surface((size,size))
+        start=Vector2(w,h)
+        end=Vector2(w,size-h)
+        normal=Vector2(1,0)
+        alongNormal=Vector2(0,1)
+        stroke=Lens.stroke/2
+        if not isConverging:
+            stroke=Vector2(Lens.stroke.x,-Lens.stroke.y)/2
+        draw.line(surf,(255,255,255),start,end,2)
+        draw.line(surf,(255,255,255),start,start+normal*stroke.x+alongNormal*stroke.y,2)
+        draw.line(surf, (255, 255, 255), start,start - normal * stroke.x + alongNormal * stroke.y,2)
+        draw.line(surf,(255,255,255),end,end+normal*stroke.x-alongNormal*stroke.y,2)
+        draw.line(surf, (255, 255, 255), end,end - normal * stroke.x - alongNormal * stroke.y,2)
+        return surf
+
 
 class Source:
     sources=[]
@@ -505,7 +574,7 @@ class Source:
         self.imaginaryRays:List[ImaginaryRay]=[]
         self.color:Tuple[int,int,int]=color
         self.strokes=[]
-        self.skeleton=Skeleton({"pos":self.pos})
+        self.skeleton=Skeleton({"pos":self.pos},self)
         for i in range(20):
             self.strokes.append(Vector2((2*rd.random()-1)*10).rotate(rd.random()*360))
         Source.sources.append(self)
@@ -534,6 +603,7 @@ class Source:
 class Ray:
     maxDepth=50
     minLength=4000
+
     def __init__(self, pos: Vector2, direction: Vector2, source:Source):
         self.startPos: Vector2 = pos
         self.startDir: Vector2 = direction/direction.length()
@@ -580,66 +650,191 @@ class Ray:
                 draw.line(win,color,construction[i-1],construction[i],3)
 
 class ImaginaryRay:
-    strokeLength=10
+    strokeLength=8
     def __init__(self,pos:Vector2,direction:Vector2):
         self.direction=direction.normalize()
         self.pos:Vector2=pos
-        self.strokeCount=2000//ImaginaryRay.strokeLength
+        self.strokeCount=600//ImaginaryRay.strokeLength
 
     def draw(self,win:Surface,color:Tuple[int,int,int]):
+        print(self.strokeCount)
         for i in range(self.strokeCount):
             draw.line(win,color,self.pos+(2*i+1)*self.direction*ImaginaryRay.strokeLength,self.pos+self.direction*(2*i+2)*ImaginaryRay.strokeLength,2)
 
+
+class Button:
+    buttons:List[Button]=[]
+    buttonPressed=False
+    def __init__(self,pos:Vector2,size:Vector2,id:str,text:str,func,fontSize:int=16,funcArgs:List[any]=None,background:Tuple[int,int,int]=(50,50,50),backgroundImage:Surface=None):
+        self.pos:Vector2=pos
+        self.size:Vector2=size
+        self.id:str=id
+        self.text:str=text
+        self.func=func
+        self.funcArgs=funcArgs if funcArgs!=None else []
+        self.background=background
+        self.pressedBackround=(150,100,100)
+        self.fontSize:int=fontSize
+        self.rect:Rect=Rect(self.pos,self.size)
+        self.isPressed:bool=False
+
+        self.font=font.SysFont("Arial",self.fontSize)
+        self.textRendered=self.font.render(self.text,False,(255,255,255))
+        self.textRenderedRect=self.textRendered.get_rect(center=self.rect.center)
+
+        self.backgroundImage = backgroundImage
+        if backgroundImage:
+            self.backgroundImageRect=self.backgroundImage.get_rect(center=self.rect.center)
+
+        Button.buttons.append(self)
+
+    def press(self):
+        self.func(*self.funcArgs)
+        self.isPressed=True
+
+    @staticmethod
+    def draw(win,currentButtons):
+        for button in Button.buttons:
+            if button.id in currentButtons:
+                if button.backgroundImage:
+                    win.blit(button.backgroundImage,button.backgroundImageRect)
+                else:
+                    draw.rect(win,button.pressedBackround if button.isPressed else button.background,button.rect,0,6)
+                draw.rect(win, (255,0,0), button.rect,2,6)
+                win.blit(button.textRendered,button.textRenderedRect)
+
+    @staticmethod
+    def pressButton(mPos:Vector2,mPress:Tuple[bool,bool,bool],currentButtons:List[str]):
+        if mPress[0]:
+            if not Button.buttonPressed:
+                for button in Button.buttons:
+                    if button.id in currentButtons:
+                        if button.rect.collidepoint(mPos.x,mPos.y):
+                            button.press()
+                            Button.buttonPressed=True
+        else:
+            if Button.buttonPressed:
+                Button.buttonPressed=False
+                for button in Button.buttons:
+                    button.isPressed=False
+
+class CreateButton(Button):
+    def __init__(self, pos: Vector2, size: Vector2, id: str,func,funcArgs: List[any],backgroundImage:Surface=None):
+        super(CreateButton, self).__init__(pos,size,id,"",func,funcArgs=funcArgs,backgroundImage=backgroundImage)
+
+    def press(self):
+        super(CreateButton, self).press()
+        funcArgs=[]
+        for arg in self.funcArgs:
+            try:
+                funcArgs.append(arg.copy())
+            except AttributeError:
+                funcArgs.append(arg)
+        self.funcArgs=funcArgs
+
+class UI:
+    def __init__(self,game:Game):
+        self.game:Game=game
+        Button(Vector2(self.game.WIDTH-70, 0), Vector2(70, 70), "quit", "QUIT", self.game.stop, 32)
+        Button(Vector2(15, 15), Vector2(70, 70), "create", "+", self.createModeOn, 120)
+
+
+        CreateButton(Vector2(0,0),Vector2(100,100),"lens+",self.createBarrier,[Lens,Vector2(100,500),Vector2(200,500),300,True],Lens.getIcoSurface(100))
+        CreateButton(Vector2(101, 0), Vector2(100, 100), "lens-", self.createBarrier,[Lens, Vector2(100, 500), Vector2(200, 500), 300, False],Lens.getIcoSurface(100,False))
+
+        Button(Vector2(100+101+15, 15), Vector2(70, 70), "unCreate", "~", self.createModeOff, 120)
+
+        self.barrierButtonIds=["lens+","lens-"]
+
+        self.currentButtons:List[str]=["quit","create"]
+        self.events=[]
+        self.rootSkeleton=Skeleton({},self)
+        self.pointsMover=PointsMover([])
+        self.mPos:Vector2=Vector2(mouse.get_pos())
+        self.mPress: Tuple[bool,bool,bool]=mouse.get_pressed()
+
+    def update(self):
+        self.mPos = Vector2(mouse.get_pos())
+        self.mPress = mouse.get_pressed(3)
+        if self.pointsMover.movedPoint==None:
+            Button.pressButton(self.mPos,self.mPress,self.currentButtons)
+
+        self.pointsMover.setPoints(self.rootSkeleton.getPoints()[0])
+        for e in event.get():
+            if e.type == QUIT:
+                self.game.stop()
+            if e.type == KEYDOWN:
+                if e.key == K_s:
+                    self.game.save()
+                if e.key == K_l:
+                    self.game.load()
+        if not Button.buttonPressed:
+            self.pointsMover.move(self.mPos,self.mPress)
+
+    def draw(self,win):
+        self.rootSkeleton.draw(win)
+        Button.draw(win,self.currentButtons)
+
+    def createModeOn(self):
+        self.currentButtons=["quit","unCreate"]+self.barrierButtonIds
+
+    def createModeOff(self):
+        self.currentButtons=["quit","create"]
+
+    def createBarrier(self,barrierType:type,*args):
+        newBar=barrierType(*list(args))
+        print(1)
+        self.rootSkeleton.addDependent(newBar.skeleton)
+        self.createModeOff()
+
+    def connectSkeletons(self):
+        for barrier in Barrier.barriers:
+            self.rootSkeleton.addDependent(barrier.skeleton)
+        for source in Source.sources:
+            self.rootSkeleton.addDependent(source.skeleton)
+
 class Game:
     def __init__(self):
-        self.WIDTH: int = 1200
-        self.HEIGHT: int = 500
+        self.WIDTH: int = 1080
+        self.HEIGHT: int = 640
         self.FPS: int = 60
         self.isRunning: bool = True
 
-        self.win: Surface = display.set_mode((self.WIDTH, self.HEIGHT))
+        self.win: Surface = display.set_mode((self.WIDTH, self.HEIGHT),RESIZABLE)
         self.clock: time.Clock = time.Clock()
 
-        self.mPos: Vector2 = Vector2(mouse.get_pos())
-        self.mPress: Tuple[bool,bool,bool]=mouse.get_pressed()
 
         self.mir=FlatRefractingSurface(Vector2(785,300),Vector2(800,100),3/2,1)
         self.screen=FlatMirror(Vector2(150,30),Vector2(103, 237),True)
         self.spherical=SphericalRefractingSurfaceReal(Vector2(100,100),Vector2(200,100),500,1,3/2)
         self.refr=FlatRefractingSurface(Vector2(800,200),Vector2(900,150),3/2,1)
-        self.lens=Lens(Vector2(600,250),Vector2(700,250),300,False)
-        self.source=Source(Vector2(200,450))
+
+        self.lens = Lens(Vector2(750, 250), Vector2(800, 250), 300, False)
+        self.lens=Lens(Vector2(600,250),Vector2(700,250),300,True)
+        self.source=Source(Vector2(200,450),(255,0,0))
         self.source.addRay(Vector2(3, -0.5))
-        self.source.addRay(Vector2(3,0))
+        self.source.addRay(Vector2(3, 0))
         self.source.addRay(Vector2(3, 0.5))
-        self.source.fullConstruct(Barrier.barriers)
-        self.pointsMover=PointsMover(Skeleton.points)
+        self.source=Source(Vector2(200,425),(255,255,0))
+        self.source.addRay(Vector2(3, -0.5))
+        self.source.addRay(Vector2(3, 0))
+        self.source.addRay(Vector2(3, 0.5))
+        self.UI=UI(self)
+        self.UI.connectSkeletons()
 
     def UpdateStuff(self):
-        self.mPos = Vector2(mouse.get_pos())
-        self.mPress = mouse.get_pressed(3)
-        self.pointsMover.move(self.mPos,self.mPress)
+        self.UI.update()
         for barrier in Barrier.barriers:
             barrier.build()
         for source in Source.sources:
             source.fullConstruct(Barrier.barriers)
-
-        for e in event.get():
-            if e.type == QUIT:
-                self.stop()
-            if e.type==KEYDOWN:
-                if e.key==K_s:
-                    self.save()
-                if e.key==K_l:
-                    self.load()
 
     def DrawStuff(self):
         for source in Source.sources:
             source.draw(self.win)
         for barrier in Barrier.barriers:
             barrier.draw(self.win)
-        for skeleton in Skeleton.skeletons:
-            skeleton.draw(self.win)
+        self.UI.draw(self.win)
 
     def WindowUpdateStuff(self):
 
@@ -674,7 +869,6 @@ class Game:
             print("file empty")
         except EOFError:
             print("file empty or corrupted")
-
 
     def run(self):
         while self.isRunning:
