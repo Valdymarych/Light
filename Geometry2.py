@@ -11,14 +11,15 @@ init()
 # 3)Динамічна зміна початкових умов
 class Point(Vector2):
     points:List[Point]=[]
-    def __init__(self,pos:List[float],color:Tuple[int,int,int]=(25,25,25),isMoveable:bool=False):
+    def __init__(self,pos:List[float],color:Union[Tuple[int,int,int],None]=(25,25,25),isMoveable:bool=False):
         super(Point, self).__init__(pos)
         self.color=color
         self.isMoveable=isMoveable
         Point.points.append(self)
 
     def draw(self,win):
-        draw.circle(win,self.color,self.xy,5)
+        if color!=None:
+            draw.circle(win,self.color,self.xy,5)
 
     @staticmethod
     def drawAll(win):
@@ -26,21 +27,51 @@ class Point(Vector2):
             point.draw(win)
 
 
-class Segment:
-    segments:List[Segment]=[]
-    def __init__(self,startPoint:Vector2,endPoint:Vector2,color:Tuple[int,int,int]=(25,25,25)):
-        self.startPoint=startPoint
-        self.endPoint=endPoint
-        self.color=color
-        Segment.segments.append(self)
+class Line:
+    lines:List[Line]=[]
+    def __init__(self,startPoint:Vector2,endPoint:Vector2,color:Union[Tuple[int,int,int],None]=(25,25,25)):
+        self.startPoint = startPoint
+        self.endPoint = endPoint
+        self.color = color
+
+        Line.lines.append(self)
 
     def draw(self,win):
-        draw.line(win,self.color,self.startPoint.xy,self.endPoint.xy,4)
+        if color != None:
+            direction=(self.endPoint-self.startPoint).normalize()
+            draw.line(win,self.color,self.startPoint-direction*2000,self.startPoint+direction*2000)
 
     @staticmethod
     def drawAll(win):
-        for segment in Segment.segments:
-            segment.draw(win)
+        for line in Line.lines:
+            line.draw(win)
+
+class Segment(Line):
+    def __init__(self,startPoint:Vector2,endPoint:Vector2,color:Union[Tuple[int,int,int],None]=(25,25,25)):
+        super(Segment, self).__init__(startPoint,endPoint,color)
+
+
+    def draw(self,win):
+        if color != None:
+            draw.line(win,self.color,self.startPoint.xy,self.endPoint.xy,4)
+
+class Circle:
+    circles:List[Circle]=[]
+    def __init__(self,center:Vector2,radius:float,color:Union[Tuple[int,int,int],None]=(25,25,25)):
+        self.center:Vector2=center
+        self.radius:float=radius
+        self.color=color
+        Circle.circles.append(self)
+
+    def draw(self,win:Surface):
+        if color != None:
+            draw.circle(win,self.color,self.center.xy,self.radius,2)
+
+    @staticmethod
+    def drawAll(win:Surface):
+        for circle in Circle.circles:
+            circle.draw(win)
+
 
 class PointMover:
     def __init__(self):
@@ -53,12 +84,13 @@ class PointMover:
             if self.currentPoint==None:
                 currentMin=2500
                 for point in Point.points:
-                    if (point-mPos).magnitude_squared()<currentMin:
-                        currentMin = (point - mPos).magnitude_squared()
-                        self.currentPoint=point
+                    if point.isMoveable:
+                        if (point-mPos).magnitude_squared()<currentMin:
+                            currentMin = (point - mPos).magnitude_squared()
+                            self.currentPoint=point
 
             if self.currentPoint!=None:
-                self.currentPoint.xy=mPos.xy
+                self.currentPoint.xy=(mPos/10+self.currentPoint*9/10).xy
         else:
             self.currentPoint=None
 
@@ -75,12 +107,14 @@ class Game:
         self.isRunning=True
 
 
-        Point([100,100])
-        Point([200,300])
-        Point([500, 300])
+        Point([100,100],isMoveable=True)
+        Point([200,300],isMoveable=True)
+        Point([500, 300],isMoveable=True)
         Segment(Point.points[0], Point.points[1])
         Segment(Point.points[1], Point.points[2])
         Segment(Point.points[0], Point.points[2])
+        Line(Point.points[0], Point.points[1])
+        Circle(Point.points[0],50)
 
         self.pointMover=PointMover()
 
@@ -93,6 +127,7 @@ class Game:
 
     def draw(self):
         Segment.drawAll(self.win)
+        Circle.drawAll(self.win)
         Point.drawAll(self.win)
 
 
