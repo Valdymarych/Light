@@ -2,15 +2,34 @@
 from __future__ import annotations
 from typing import Tuple,List,Union,Dict,Callable
 from pygame import *
+from math import atan2
 init()
 def rot90(v:Vector2,clock:bool=True)->Vector2:
     return Vector2(-int(clock)*v.y,int(clock)*v.x)
-# План:
-# 1)Створення початкових умов
-# 2)Побудова структури на базі данних початкових умов
-#   2.0)Розбиття побудови на менші частинки
-#   2.1)Побудова елементарних частинок за допомогою базових функцій побудови
-# 3)Динамічна зміна початкових умов
+def getAngleBetweenVectors(v1,v2):
+    return atan2(v1.cross(v2),v1.dot(v2))
+
+
+def build(p1,p2,p3):
+    s1,s2,s3=buildTriangle(p1,p2,p3,1)
+
+    l1=Ray(p2,p3,(25,25,25))
+    l2=Line(p1,p3,None)
+    l3=Ray(p2,p1,(25,25,25))
+
+    b=buildBisectorLine(p2,l1,l3,(False,False),color=(255,0,0))
+    #inCircle=buildExternallyInscribedCircle(p1, p2, l1, l2, l3, (True, False),1)
+    #outCircle=buildExternallyInscribedCircle(p1, p2, l1, l2, l3, (False, False),1)
+    #aroundCricle=buildCircumscribedCircle(p1,p2,p3,3)
+
+    #Ray(p2,inCircle.center,(25,25,25))
+
+    #w=Point(color=(0,255,0),dynamicPosition=lambda:Factory.line2circleSecondPoint(p2,b,aroundCricle))
+    #Segment(w,inCircle.center,color=(0,0,255))
+    #Segment(w, outCircle.center, color=(0, 0, 255))
+    #Segment(w, p1, color=(0, 0, 255))
+    #Segment(w, p3, color=(0, 0, 255))
+
 
 class Drawwer:
     win:Union[Surface,None]=None
@@ -31,30 +50,47 @@ class Drawwer:
     @staticmethod
     def drawSegment(self:Segment):
         if Drawwer.noneColorCheck(self):
-            draw.line(Drawwer.win, self.color, self.startPoint.xy, self.endPoint.xy, 3)
+            if self.width==1:
+                draw.aaline(Drawwer.win, self.color, self.startPoint.xy, self.endPoint.xy)
+            else:
+                draw.line(Drawwer.win, self.color, self.startPoint.xy, self.endPoint.xy, self.width)
+
+    @staticmethod
+    def drawRay(self:Ray):
+        if Drawwer.noneColorCheck(self):
+            if (self.endPoint-self.startPoint).magnitude_squared()==0:
+                return
+            direction=(self.endPoint-self.startPoint).normalize()
+            draw.line(Drawwer.win,self.color,self.startPoint,self.startPoint+direction*2000)
 
     @staticmethod
     def drawCircle(self:Circle):
         if Drawwer.noneColorCheck(self):
-            draw.circle(Drawwer.win, self.color, self.center.xy, self.radius, 2)
-
+            if self.radius>100000:
+                return
+            draw.circle(Drawwer.win, self.color, self.center.xy, self.radius,self.width)
     @staticmethod
     def noneColorCheck(self):
+        if not Drawwer.invisible:
+            if self.color==None:
+                self.color=(25,25,52)
         return self.color != None
 
 
     @staticmethod
-    def setWin(win:Surface):
+    def setWin(win:Surface,invisible:bool):
         Drawwer.win=win
+        Drawwer.invisible=invisible
 
 
 class Point(Vector2):
     points:List[Point]=[]
+    name="point"
     def __init__(self,pos:Union[List[float],None]=None,color:Union[Tuple[int,int,int],None]=None,isMoveable:bool=False,
-                 dynamicPosition:Union[None,Callable]=None,management:Union[List,None]=None):
+                 dynamicPosition:Union[None,Callable]=None):
         self.dynamicPosition=dynamicPosition
         if self.dynamicPosition:
-            management.append(self)
+            Factory.management.append(self)
             pos=self.dynamicPosition()
         super(Point, self).__init__(pos)
         self.color=color
@@ -74,6 +110,7 @@ class Point(Vector2):
 
 class Line:
     lines:List[Line]=[]
+    name = "line"
     def __init__(self,startPoint:Vector2,endPoint:Vector2,color:Union[Tuple[int,int,int],None]=None):
         self.startPoint = startPoint
         self.endPoint = endPoint
@@ -91,24 +128,36 @@ class Line:
 
 class Segment(Line):
     segments=[]
-    def __init__(self,startPoint:Vector2,endPoint:Vector2,color:Union[Tuple[int,int,int],None]=None):
+    name = "segment"
+    def __init__(self,startPoint:Vector2,endPoint:Vector2,color:Union[Tuple[int,int,int],None]=None,width:int=2):
         super(Segment, self).__init__(startPoint,endPoint,color)
+        self.width=width
         Segment.segments.append(self)
 
     def draw(self):
         Drawwer.drawSegment(self)
 
+class Ray(Line):
+    name = "ray"
+    def __init__(self,startPoint:Vector2,endPoint:Vector2,color:Union[Tuple[int,int,int],None]=None):
+        super(Ray, self).__init__(startPoint,endPoint,color)
+
+    def draw(self):
+        Drawwer.drawRay(self)
+
 class Circle:
     circles:List[Circle]=[]
+    name = "circle"
     def __init__(self,center:Vector2,radius:Union[float,None]=None,color:Union[Tuple[int,int,int],None]=None,
-                 dynamicRadius:Union[None,Callable]=None,management:Union[List,None]=None):
+                 dynamicRadius:Union[None,Callable]=None,width:int=2):
         self.center:Vector2=center
         self.color=color
         self.dynamicRadius=dynamicRadius
         if dynamicRadius:
-            management.append(self)
+            Factory.management.append(self)
             radius=self.dynamicRadius()
         self.radius: float = radius
+        self.width=width
         Circle.circles.append(self)
 
 
@@ -144,39 +193,60 @@ class PointMover:
         else:
             self.currentPoint=None
 
-class IntersectionFactory:
-    def __init__(self,management:List):
-        self.management=management
+class Factory:
+    management:List = []
 
-    def line2lineVectors(self,A:Vector2,B:Vector2,C:Vector2,D:Vector2):
-        if (B-A).cross(D-C)==0:
-            return []
-        k=-(A-C).cross(D-C)/(B-A).cross(D-C)
-        return A+k*(B-A)
-
-    def line2line(self,l1:Line,l2:Line):
+    @staticmethod
+    def line2lineKoefs(l1,l2):
         A=l1.startPoint
         B=l1.endPoint
         C=l2.startPoint
         D=l2.endPoint
-        if (B-A).cross(D-C)==0:
+
+        if (B - A).cross(D - C) == 0:
             return []
-        k=-(A-C).cross(D-C)/(B-A).cross(D-C)
+        k = -(A - C).cross(D - C) / (B - A).cross(D - C)
+        d = -(C - A).cross(B - A) / (D - C).cross(B - A)
+        return [k,d]
+
+    @staticmethod
+    def line2lineVectorsKoefs(A:Vector2,B:Vector2,C:Vector2,D:Vector2):
+        if (B - A).cross(D - C) == 0:
+            return []
+        k = -(A - C).cross(D - C) / (B - A).cross(D - C)
+        d = -(C - A).cross(B - A) / (D - C).cross(B - A)
+        return [k,d]
+
+    @staticmethod
+    def line2lineVectors(A:Vector2,B:Vector2,C:Vector2,D:Vector2):
+
+        koefs=Factory.line2lineVectorsKoefs(A,B,C,D)
+        if len(koefs)==0:
+            return []
+        k=koefs[0]
         return A+k*(B-A)
 
-    def line2segment(self,l:Line,s:Segment):
-        A=s.startPoint
-        B=s.endPoint
-        C=l.startPoint
-        D=l.endPoint
-        if (B-A).cross(D-C)==0:
+    @staticmethod
+    def line2line(l1:Line,l2:Line):
+        koefs=Factory.line2lineKoefs(l1,l2)
+        if len(koefs)==0:
             return []
-        k=-(A-C).cross(D-C)/(B-A).cross(D-C)
-        if 0<=k and k<=1:
-            return A + k * (B - A)
-        return[]
+        k=koefs[0]
+        return l1.startPoint+k*(l1.endPoint-l1.startPoint)
 
-    def line2segmentVectors(self,A:Vector2,B:Vector2,C:Vector2,D:Vector2):
+    @staticmethod
+    def line2segment(l:Line,s:Segment):
+        koefs=Factory.line2lineKoefs(l,s)
+        if len(koefs)==0:
+            return []
+        k=koefs[0]
+        d=koefs[1]
+        if 0<d and d<1:
+            return l.startPoint+k*(l.endPoint-l.startPoint)
+        return []
+
+    @staticmethod
+    def line2segmentVectors(A:Vector2,B:Vector2,C:Vector2,D:Vector2):
         """
         :param A: segment start
         :param B: segment end
@@ -184,23 +254,87 @@ class IntersectionFactory:
         :param D: line end
         :return: intersection
         """
-        if (B-A).cross(D-C)==0:
+        koefs=Factory.line2lineVectorsKoefs(A,B,C,D)
+        if len(koefs)==0:
             return []
-        k=-(A-C).cross(D-C)/(B-A).cross(D-C)
-        if 0<=k and k<=1:
-            return A + k * (B - A)
+        k,d=koefs
+        if d>0 and d<1:
+            return A+k*(B-A)
         return[]
 
-    def segment2segment(self,A:Vector2,B:Vector2,C:Vector2,D:Vector2):
-        if (B-A).cross(D-C)==0:
+    @staticmethod
+    def segment2segmentVectors(A:Vector2,B:Vector2,C:Vector2,D:Vector2):
+        koefs=Factory.line2lineVectorsKoefs(A,B,C,D)
+        if len(koefs)==0:
             return []
-        k=-(A-C).cross(D-C)/(B-A).cross(D-C)
-        d=-(C-A).cross(B-A)/(D-C).cross(B-A)
-        if 0<=k and k<=1 and 0<=d and d<=1:
-            return A + k * (B - A)
+        k,d=koefs
+        if d>0 and d<1 and k>0 and k<1:
+            return A+k*(B-A)
         return[]
 
-    def line2circle(self,l:Line,c:Circle):
+    @staticmethod
+    def ray2segmentVectors(A:Vector2,B:Vector2,C:Vector2,D:Vector2):
+        koefs=Factory.line2lineVectorsKoefs(A,B,C,D)
+        if len(koefs)==0:
+            return []
+        k,d=koefs
+        if k>0 and d>0 and d<1:
+            return A+k*(B-A)
+        return[]
+
+    @staticmethod
+    def ray2segment(r:Ray,s:Segment):
+        koefs=Factory.line2lineKoefs(r,s)
+        if len(koefs)==0:
+            return []
+        k,d=koefs
+        if k>0 and d>0 and d<1:
+            return r.startPoint+k*(r.endPoint-r.startPoint)
+        return[]
+
+    @staticmethod
+    def ray2rayVectors(A:Vector2,B:Vector2,C:Vector2,D:Vector2):
+        koefs=Factory.line2lineVectorsKoefs(A,B,C,D)
+        if len(koefs)==0:
+            return []
+        k,d=koefs
+        if d>0 and k>0:
+            return A+k*(B-A)
+        return[]
+
+    @staticmethod
+    def ray2ray(r1:Ray,r2:Ray):
+        koefs=Factory.line2lineKoefs(r1,r2)
+        if len(koefs)==0:
+            return []
+        k,d=koefs
+        if k>0 and d>0:
+            return r1.startPoint+k*(r1.endPoint-r1.startPoint)
+        return[]
+
+    @staticmethod
+    def ray2lineVectors(A:Vector2,B:Vector2,C:Vector2,D:Vector2):
+        koefs=Factory.line2lineVectorsKoefs(A,B,C,D)
+        if len(koefs)==0:
+            return []
+        k,d=koefs
+        if k>0:
+            return A+k*(B-A)
+        return[]
+
+    @staticmethod
+    def ray2line(r:Ray,l:Line):
+        koefs=Factory.line2lineKoefs(r,l)
+        if len(koefs)==0:
+            return []
+        k,d=koefs
+        if k>0:
+            return r.startPoint+k*(r.endPoint-r.startPoint)
+        return[]
+
+
+    @staticmethod
+    def line2circle(l:Line,c:Circle):
         A=l.startPoint
         B=l.endPoint
         C=c.center
@@ -218,7 +352,8 @@ class IntersectionFactory:
             k2=(-b-d**0.5)/2/a
             return [A+k1*(B-A),A+k2*(B-A)]
 
-    def segment2circle(self,s:Segment,c:Circle):
+    @staticmethod
+    def segment2circle(s:Segment,c:Circle):
         A=s.startPoint
         B=s.endPoint
         C=c.center
@@ -242,7 +377,33 @@ class IntersectionFactory:
                 res.append(A+k2*(B-A))
             return res
 
-    def circle2circle(self,c1:Circle,c2:Circle):
+    @staticmethod
+    def ray2circle(r:Ray,c:Circle):
+        A=r.startPoint
+        B=r.endPoint
+        C=c.center
+        a=(A-B).magnitude_squared()
+        b=2*(A-B).dot(C-A)
+        c=(C-A).magnitude_squared()-c.radius**2
+        d=b**2-4*a*c
+        if d<0:
+            return []
+        if d==0:
+            k=-b/2/a
+            if 0<k:
+                return [A+k*(B-A)]
+        if d>0:
+            k1=(-b+d**0.5)/2/a
+            k2=(-b-d**0.5)/2/a
+            res=[]
+            if 0<k1:
+                res.append(A+k1*(B-A))
+            if 0<k2:
+                res.append(A+k2*(B-A))
+            return res
+
+    @staticmethod
+    def circle2circle(c1:Circle,c2:Circle):
         B=c1.center
         C=c2.center
 
@@ -257,60 +418,97 @@ class IntersectionFactory:
         y=rot90(C-B).normalize()*(R1**2-x.magnitude_squared())**0.5
         return [B+x+y,B+x-y]
 
+    @staticmethod
+    def circle2circleVectors(B:Vector2,C:Vector2,R1:float,R2:float):
+        if (B-C).magnitude_squared()==0:
+            return []
+        x=(R1**2+(B-C).magnitude_squared()-R2**2)/2/(B-C).magnitude_squared()*(C-B)
+        if R1**2<x.magnitude_squared():
+            return []
+        if R1**2==x.magnitude_squared():
+            return [B+x]
+        y=rot90(C-B).normalize()*(R1**2-x.magnitude_squared())**0.5
+        return [B+x+y,B+x-y]
 
-def buildTriangle(p1,p2,p3):
-    s1=Segment(p1,p2,color=(25,25,25))
-    s2=Segment(p2,p3,color=(25,25,25))
-    s3=Segment(p3,p1,color=(25,25,25))
+    @staticmethod
+    def line2circleSecondPoint(basePoint:Point,l:Line,c:Circle):
+        points=Factory.line2circle(l,c)
+        if len(points)==0:
+            return []
+        if len(points)==1:
+            return points[0]
+        if (basePoint-points[0]).magnitude_squared()>(basePoint-points[1]).magnitude_squared():
+            return points[0]
+        else:
+            return points[1]
+
+
+def buildTriangle(p1,p2,p3,width:int=2):
+    s1=Segment(p1,p2,color=(25,25,25),width=width)
+    s2=Segment(p2,p3,color=(25,25,25),width=width)
+    s3=Segment(p3,p1,color=(25,25,25),width=width)
     return s1,s2,s3
 
 
-def buildBisector(p,l1:Line,l2:Line,factory:IntersectionFactory,orientation:Tuple[bool,bool]=(False,False),
+def buildBisectorLine(p,l1:Line,l2:Line,orientation:Tuple[bool,bool]=(False,False),
                   color:Union[None,Tuple[int,int,int]]=None):
-    c1=Circle(p,25,None)
-    p11=Point(dynamicPosition=lambda :factory.line2circle(l1,c1)[int(orientation[0])],management=factory.management)
-    p12=Point(dynamicPosition=lambda :factory.line2circle(l2,c1)[int(orientation[1])],management=factory.management)
-    bisector=buildMedianPerpendicular(p11,p12,factory,color)
+    c1=Circle(p,100,None)
+    p11=Point(dynamicPosition=lambda :Factory.line2circle(l1,c1)[int(orientation[0])])
+    p12=Point(dynamicPosition=lambda :Factory.line2circle(l2,c1)[int(orientation[1])])
+    bisector=buildMedianPerpendicular(p11,p12,color)
     return bisector
 
-def buildCevian(p:Point,l:Line,s:Segment,factory:IntersectionFactory):
-    p2=Point(dynamicPosition=lambda:factory.line2line(l,s),management=factory.management)
+def buildBisectorRay(p,l1:Line,l2:Line,l3:Line,orientation:Tuple[bool,bool]=(False,False),
+                  color:Union[None,Tuple[int,int,int]]=None):
+    protoBisector=buildBisectorLine(p,l1,l2,orientation)
+    p1=Point(dynamicPosition=lambda: Factory.line2line(protoBisector,l3))
+    bisector=Ray(p,p1,color=color)
+    return bisector
+
+def buildCevian(p:Point,l:Line,s:Segment):
+    p2=Point(dynamicPosition=lambda:Factory.line2line(l,s))
     Segment(p,p2,(250,0,0))
 
-def buildMedianPerpendicular(p1:Point,p2:Point,factory:IntersectionFactory,color:Union[None,Tuple[int,int,int]]=None):
-    c1=Circle(p1,dynamicRadius=lambda:(p1-p2).magnitude(),management=factory.management)
-    c2=Circle(p2,dynamicRadius=lambda:(p1-p2).magnitude(),management=factory.management)
-    p3=Point(dynamicPosition=lambda:factory.circle2circle(c1,c2)[0],management=factory.management)
-    p4 = Point(dynamicPosition=lambda: factory.circle2circle(c1, c2)[1],management=factory.management)
+def buildMedianPerpendicular(p1:Point,p2:Point,color:Union[None,Tuple[int,int,int]]=None):
+    c1=Circle(p1,dynamicRadius=lambda:(p1-p2).magnitude())
+    c2=Circle(p2,dynamicRadius=lambda:(p1-p2).magnitude())
+    p3=Point(dynamicPosition=lambda:Factory.circle2circle(c1,c2)[0])
+    p4 = Point(dynamicPosition=lambda:Factory.circle2circle(c1, c2)[1])
     medianPerpendicular=Line(p3,p4,color)
     return medianPerpendicular
 
-def buildNormal(p:Point,l:Line,factory:IntersectionFactory,color:Union[None,Tuple[int,int,int]]=None):
-    c=Circle(p,dynamicRadius=lambda:(l.startPoint-p).magnitude(),management=factory.management)
-    p1=Point(dynamicPosition=lambda:factory.line2circle(l,c)[0],management=factory.management)
-    p2=Point(dynamicPosition=lambda:factory.line2circle(l,c)[1],management=factory.management)
-    normal=buildMedianPerpendicular(p1,p2,factory,color)
+def buildNormal(p:Point,l:Line,color:Union[None,Tuple[int,int,int]]=None):
+    c=Circle(p,dynamicRadius=lambda:(l.startPoint-p).magnitude())
+    p1=Point(dynamicPosition=lambda:Factory.line2circle(l,c)[0])
+    p2=Point(dynamicPosition=lambda:Factory.line2circle(l,c)[1])
+    normal=buildMedianPerpendicular(p1,p2,color)
     return normal
 
-def buildExternallyInscribedCircle(p1,p2,l1,l2,l3,orientation,factory):
-    b1 = buildBisector(p1, l2, l3, factory, (False,orientation[0]))
-    b2 = buildBisector(p2, l1, l3, factory, (False,orientation[1]))
-    o2 = Point(color=(100, 100, 0), dynamicPosition=lambda: factory.line2line(b1, b2), management=factory.management)
-    normal2 = buildNormal(o2, l1, factory, None)
-    h2 = Point(color=(0, 100, 0), dynamicPosition=lambda: factory.line2line(l1, normal2), management=factory.management)
-    c2 = Circle(o2, dynamicRadius=lambda: (h2 - o2).magnitude(), management=factory.management, color=(25, 25, 25))
+def buildExternallyInscribedCircle(p1,p2,l1,l2,l3,orientation,width=2):
+    b1 = buildBisectorLine(p1, l2, l3, (False,orientation[0]))
+    b2 = buildBisectorLine(p2, l1, l3, (False,orientation[1]))
+    o = Point(color=(100, 100, 0), dynamicPosition=lambda: Factory.line2line(b1, b2))
+    normal = buildNormal(o, l1, None)
+    h = Point(dynamicPosition=lambda: Factory.line2line(l1, normal))
+    c = Circle(o, dynamicRadius=lambda: (h - o).magnitude(), color=(25, 25, 25),width=width)
+    return c
 
-def build(p1,p2,p3,factory):
-    s1,s2,s3=buildTriangle(p1,p2,p3)
+def buildCircumscribedCircle(p1,p2,p3,width=2)->Circle:
+    """
+    Описане коло
+    :param p1: вершина1
+    :param p2: вершина2
+    :param p3: вершина3
+    :param width: товщина кола
+    :return: Коло описане навколо трикутника
+    """
+    per1=buildMedianPerpendicular(p1,p2)
+    per2=buildMedianPerpendicular(p2,p3)
+    cen=Point(dynamicPosition=lambda:Factory.line2line(per1,per2),color=(200,0,0))
+    c=Circle(cen,dynamicRadius=lambda:(cen-p1).magnitude(),color=(25,25,25),width=width)
+    return c
 
-    l1=Line(p2,p3,(25,25,25))
-    l2=Line(p1,p3,(25,25,25))
-    l3=Line(p1,p2,(25,25,25))
 
-    buildExternallyInscribedCircle(p1,p2,l1,l2,l3,(False,False),factory)
-    buildExternallyInscribedCircle(p1, p2, l1, l2, l3, (True, False), factory)
-    buildExternallyInscribedCircle(p1, p2, l1, l2, l3,(True, True), factory)
-    buildExternallyInscribedCircle(p1, p2, l1, l2, l3, (False, True), factory)
 
 
 def manage(management):
@@ -318,9 +516,9 @@ def manage(management):
         object.manage()
 
 class Game:
-    def __init__(self):
-        self.WIDTH=1000
-        self.HEIGHT=500
+    def __init__(self,invisible:bool=False):
+        self.WIDTH=1500
+        self.HEIGHT=700
         self.FPS=60
         self.BACKGROUND=(200,200,200)
 
@@ -329,21 +527,20 @@ class Game:
         self.isRunning=True
 
 
-        p1=Point([400,100],isMoveable=True,color=(25,25,25))
-        p2=Point([500,100],isMoveable=True,color=(25,25,25))
-        p3=Point([500, 400],isMoveable=True,color=(25,25,25))
 
+        p1=Point([600,100],isMoveable=True,color=(25,25,25))
+        p2=Point([700,100],isMoveable=True,color=(25,25,25))
+        p3=Point([800, 400],isMoveable=True,color=(25,25,25))
+        print()
         self.pointMover=PointMover()
-        self.management:List[any]=[]
-        self.intersection=IntersectionFactory(self.management)
-        Drawwer.setWin(self.win)
-        build(p1, p2, p3,self.intersection)
+        Drawwer.setWin(self.win,invisible)
+        build(p1, p2, p3)
     def update(self):
         for even in event.get():
             if even.type==QUIT:
                 self.stop()
         self.pointMover.update()
-        manage(self.management)
+        manage(Factory.management)
 
     def draw(self):
         Line.drawAll()
@@ -368,5 +565,5 @@ class Game:
         self.isRunning=False
 
 if __name__=="__main__":
-    game=Game()
+    game=Game(False)
     game.run()
