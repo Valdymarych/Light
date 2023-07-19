@@ -73,7 +73,11 @@ class Drawwer:
         if not Drawwer.invisible:
             if self.color==None:
                 self.color=(25,25,52)
-        return self.color != None
+        if self.color == None:
+            return False
+        else:
+            if self.getState():
+                return True
 
 
     @staticmethod
@@ -94,10 +98,16 @@ class Point(Vector2):
         super(Point, self).__init__(pos)
         self.color=color
         self.isMoveable=isMoveable
+        self.state=True
         Point.points.append(self)
 
     def manage(self):
-        self.xy=self.dynamicPosition()
+        pos=self.dynamicPosition()
+        if pos==None:
+            self.state=False
+        else:
+            self.state=True
+            self.xy=pos
 
     def draw(self):
         Drawwer.drawPoint(self)
@@ -107,6 +117,9 @@ class Point(Vector2):
         for point in Point.points:
             point.draw()
 
+    def getState(self):
+        return self.state
+
 class Line:
     lines:List[Line]=[]
     name = "line"
@@ -114,7 +127,6 @@ class Line:
         self.startPoint = startPoint
         self.endPoint = endPoint
         self.color = color
-
         Line.lines.append(self)
 
     def draw(self):
@@ -124,6 +136,9 @@ class Line:
     def drawAll():
         for line in Line.lines:
             line.draw()
+
+    def getState(self):
+        return self.startPoint.getState() and self.endPoint.getState()
 
 class Segment(Line):
     segments=[]
@@ -135,6 +150,7 @@ class Segment(Line):
 
     def draw(self):
         Drawwer.drawSegment(self)
+
 
 class Ray(Line):
     name = "ray"
@@ -170,6 +186,9 @@ class Circle:
     def drawAll():
         for circle in Circle.circles:
             circle.draw()
+
+    def getState(self):
+        return self.center.getState() and (True if self.radius else self.radiusPoint.getState())
 
 class PointMover:
     def __init__(self):
