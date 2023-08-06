@@ -6,33 +6,156 @@ from math import atan2
 init()
 def rot90(v:Vector2,clock:bool=True)->Vector2:
     return Vector2(-int(clock)*v.y,int(clock)*v.x)
+def clamp(num, min_value, max_value):
+   return max(min(num, max_value), min_value)
 def getAngleBetweenVectors(v1,v2):
     return atan2(v1.cross(v2),v1.dot(v2))
 
 
 def build(p1,p2,p3):
     #s1,s2,s3=buildTriangle(p1,p2,p3,1)
+    c2=Circle(p3,radius=100,color=(0,0,0))
+    p_move1=p1#Point([0,0],(0,0,0),True,[c2])
+    c=Circle(p_move1,radius=150,color=(0,0,0))
 
-    c=Circle(p1,radius=50,color=(0,0,0))
-    t1,t2=buildTangents(p2,c)
-    Ray(p2,t1,color=(0,0,0))
-    Ray(p2, t2, color=(0, 0, 0))
-    #inCircle=buildExternallyInscribedCircle(p1, p2, l1, l2, l3, (True, False),1)
-    #outCircle=buildExternallyInscribedCircle(p1, p2, l1, l2, l3, (False, False),1)
-    #aroundCricle=buildCircumscribedCircle(p1,p2,p3,3)
 
-    #Ray(p2,inCircle.center,(25,25,25))
+    l=Line(p_move1,p3)
+    per1=buildNormal(p_move1,l)
+    per2=buildNormal(p3,l)
 
-    #w=Point(color=(0,255,0),dynamicPosition=lambda:Factory.line2circleSecondPoint(p2,b,aroundCricle))
-    #Segment(w,inCircle.center,color=(0,0,255))
-    #Segment(w, outCircle.center, color=(0, 0, 255))
-    #Segment(w, p1, color=(0, 0, 255))
-    #Segment(w, p3, color=(0, 0, 255))
+    p4=intersectionPoint(per1,c)
+    p5=intersectionPoint(per2,c2)
 
+    l2=Line(p4,p5)
+    h=intersectionPoint(l,l2,color=(255,0,0))
+    t1,t2=buildTangents(h,c)
+    r1=Ray(h,t1,(0,0,0))
+    r2=Ray(h, t2, (0, 0, 0))
+    b=Ray(h,c.center,color=(0,0,255))
+    p_move = Point([0, 0], (255, 0, 0), True, [b])
+    n1=buildNormal(p_move,r1)
+    pn1=intersectionPoint(n1,r1,color=(0,0,0))
+    n2=buildNormal(p_move,r2)
+    pn2 = intersectionPoint(n2, r2,color=(0,0,0))
+    Segment(p_move,pn1,(0,0,0))
+    Segment(p_move, pn2,color=(0,0,0))
+
+def getClosestIntersectionPointParams(p:Vector2):
+    primitives=Drawwer.getAllVisibleObjects()
+    params={
+        "a":None,
+        "b":None,
+        "a_class":None,
+        "b_class":None,
+        "orientation":None
+    }
+    minLength=10000**2
+    def checkPos(a,b,pos,orientation=False):
+        if pos:
+            length = (pos - p).magnitude_squared()
+            if length < minLength:
+                params["a"]=a
+                params["b"]=b
+                params["a_class"]=a.__class__.name
+                params["b_class"] =b.__class__.name
+                params["orientation"]=orientation
+                return length
+        return minLength
+    for a in primitives:
+        for b in primitives:
+            if a is b:
+                continue
+            if "circle" in [a.__class__.name,b.__class__.name]:
+                pos1=inter(a,b,a.__class__.name,b.__class__.name,orientation=False)()
+                pos2 = inter(a, b, a.__class__.name, b.__class__.name, orientation=True)()
+                minLength=checkPos(a,b,pos1,False)
+                minLength=checkPos(a, b, pos2,True)
+            else:
+                pos=inter(a,b,a.__class__.name,b.__class__.name)()
+                minLength=checkPos(a,b,pos)
+
+    points=Drawwer.getAllVisiblePoints()
+    pointsParams=[point.metaParams for point in points]
+    for pointParams in pointsParams:
+        k=0
+        if pointParams:
+            if pointParams["a"] is params["a"]:
+                k+=1
+            if pointParams["b"] is params["b"]:
+                k+=1
+            if pointParams["orientation"] is params["orientation"]:
+                k+=1
+        if k==3:
+            return 10000,params
+    return minLength,params
+
+class Point(Vector2):
+    points:List[Point]=[]
+    name="point"
+    def __init__(self,pos:Union[List[float],None]=None,color:Union[Tuple[int,int,int],None]=None,isMoveable:bool=False,
+                 restriction:List[object]=None,dynamicPosition:Union[None,Callable]=None,metaParams:Dict=None):
+        self.dynamicPosition=dynamicPosition
+        self.state = True
+        self.restriction=restriction
+        if self.restriction:
+            Factory.management.append(self)
+        if self.dynamicPosition:
+            Factory.management.append(self)
+            pos=self.manage()
+        if self.state:
+            super(Point, self).__init__(pos)
+        else:
+            super(Point, self).__init__(0,0)
+        self.color=color
+        self.isMoveable=isMoveable
+        self.metaParams=metaParams
+
+        Point.points.append(self)
+
+    def manage(self):
+        if self.restriction:
+            self.restrict()
+        if self.dynamicPosition:
+            pos=self.dynamicPosition()
+            if pos==None:
+                self.state=False
+            else:
+                self.state=True
+                self.xy=pos
+            return pos
+
+    def draw(self):
+        Drawwer.drawPoint(self)
+
+    @staticmethod
+    def drawAll():
+        for point in Point.points:
+            point.draw()
+
+    def getState(self):
+        return self.state
+
+    def restrict(self):
+        poses:List[Union[None,Vector2]]=[restriction.closestPoint(self) for restriction in self.restriction]
+        poses_clear:List[Vector2]=[]
+        for pos in poses:
+            if pos!=False:
+                poses_clear.append(pos)
+        if len(poses_clear)==0:
+            self.state=False
+        else:
+            self.state=True
+            lengths=[(pos-self).magnitude_squared() for pos in poses_clear]
+            self.xy=poses_clear[lengths.index(min(lengths))]
 
 class Drawwer:
     win:Union[Surface,None]=None
+    winCorners=[
 
+    ]
+    winEdges=[
+
+    ]
     @staticmethod
     def drawPoint(self:Point):
         if Drawwer.noneColorCheck(self):
@@ -43,8 +166,15 @@ class Drawwer:
         if Drawwer.noneColorCheck(self):
             if (self.endPoint-self.startPoint).magnitude_squared()==0:
                 return
-            direction=(self.endPoint-self.startPoint).normalize()
-            draw.line(Drawwer.win,self.color,self.startPoint-direction*2000,self.startPoint+direction*2000)
+            points=[]
+            for edge in Drawwer.winEdges:
+                intersection=Factory.line2segment(self,edge)
+                if intersection:
+                    points.append(intersection)
+            if len(points)!=2:
+                return
+
+            draw.line(Drawwer.win,self.color,points[0],points[1])
 
     @staticmethod
     def drawSegment(self:Segment):
@@ -59,8 +189,15 @@ class Drawwer:
         if Drawwer.noneColorCheck(self):
             if (self.endPoint-self.startPoint).magnitude_squared()==0:
                 return
-            direction=(self.endPoint-self.startPoint).normalize()
-            draw.line(Drawwer.win,self.color,self.startPoint,self.startPoint+direction*2000)
+            points=[]
+            for edge in Drawwer.winEdges:
+                intersection=Factory.ray2segment(self,edge)
+                if intersection:
+                    points.append(intersection)
+            if len(points)==1:
+                draw.line(Drawwer.win, self.color, self.startPoint, points[0])
+            if len(points)==2:
+                draw.line(Drawwer.win, self.color, points[1], points[0])
 
     @staticmethod
     def drawCircle(self:Circle):
@@ -84,46 +221,42 @@ class Drawwer:
     def setWin(win:Surface,invisible:bool):
         Drawwer.win=win
         Drawwer.invisible=invisible
-
-
-class Point(Vector2):
-    points:List[Point]=[]
-    name="point"
-    def __init__(self,pos:Union[List[float],None]=None,color:Union[Tuple[int,int,int],None]=None,isMoveable:bool=False,
-                 dynamicPosition:Union[None,Callable]=None):
-        self.dynamicPosition=dynamicPosition
-        if self.dynamicPosition:
-            Factory.management.append(self)
-            pos=self.dynamicPosition()
-        super(Point, self).__init__(pos)
-        self.color=color
-        self.isMoveable=isMoveable
-        self.state=True
-        Point.points.append(self)
-
-    def manage(self):
-        pos=self.dynamicPosition()
-        if pos==None:
-            self.state=False
-        else:
-            self.state=True
-            self.xy=pos
-
-    def draw(self):
-        Drawwer.drawPoint(self)
+        Drawwer.WIDTH=win.get_width()
+        Drawwer.HEIGHT=win.get_height()
+        Drawwer.winCorners=[
+            Point([0,0]),
+            Point([Drawwer.WIDTH,0]),
+            Point([Drawwer.WIDTH,Drawwer.HEIGHT]),
+            Point([0, Drawwer.HEIGHT])
+        ]
+        Drawwer.winEdges=[
+            Segment(Drawwer.winCorners[0],Drawwer.winCorners[1]),
+            Segment(Drawwer.winCorners[1], Drawwer.winCorners[2]),
+            Segment(Drawwer.winCorners[2], Drawwer.winCorners[3]),
+            Segment(Drawwer.winCorners[3], Drawwer.winCorners[0])
+        ]
 
     @staticmethod
-    def drawAll():
-        for point in Point.points:
-            point.draw()
+    def getAllVisibleObjects():
+        res=[]
+        for object in Line.lines+Circle.circles:
+            if Drawwer.noneColorCheck(object):
+                res.append(object)
+        return res
 
-    def getState(self):
-        return self.state
+    @staticmethod
+    def getAllVisiblePoints():
+        res=[]
+        for object in Point.points:
+            if Drawwer.noneColorCheck(object):
+                res.append(object)
+        return res
+
 
 class Line:
     lines:List[Line]=[]
     name = "line"
-    def __init__(self,startPoint:Vector2,endPoint:Vector2,color:Union[Tuple[int,int,int],None]=None):
+    def __init__(self,startPoint:Point,endPoint:Point,color:Union[Tuple[int,int,int],None]=None):
         self.startPoint = startPoint
         self.endPoint = endPoint
         self.color = color
@@ -140,37 +273,55 @@ class Line:
     def getState(self):
         return self.startPoint.getState() and self.endPoint.getState()
 
+    def closestPoint(self,p:Vector2):
+        if self.getState()==False:
+            return False
+        ba = self.endPoint - self.startPoint
+        pa = p - self.startPoint
+        h = pa.dot(ba) / ba.dot(ba)
+        return self.startPoint+h*ba
 class Segment(Line):
     segments=[]
     name = "segment"
-    def __init__(self,startPoint:Vector2,endPoint:Vector2,color:Union[Tuple[int,int,int],None]=None,width:int=2):
+    def __init__(self,startPoint:Point,endPoint:Point,color:Union[Tuple[int,int,int],None]=None,width:int=2):
         super(Segment, self).__init__(startPoint,endPoint,color)
         self.width=width
         Segment.segments.append(self)
 
     def draw(self):
         Drawwer.drawSegment(self)
-
-
+    def closestPoint(self,p:Vector2):
+        if self.getState()==False:
+            return False
+        ba = self.endPoint - self.startPoint
+        pa = p - self.startPoint
+        h = clamp(pa.dot(ba) / ba.dot(ba),0,1)
+        return self.startPoint+h*ba
 class Ray(Line):
     name = "ray"
-    def __init__(self,startPoint:Vector2,endPoint:Vector2,color:Union[Tuple[int,int,int],None]=None):
+    def __init__(self,startPoint:Point,endPoint:Point,color:Union[Tuple[int,int,int],None]=None):
         super(Ray, self).__init__(startPoint,endPoint,color)
 
     def draw(self):
         Drawwer.drawRay(self)
-
+    def closestPoint(self,p:Vector2):
+        if self.getState()==False:
+            return False
+        ba = self.endPoint - self.startPoint
+        pa = p - self.startPoint
+        h = max(pa.dot(ba) / ba.dot(ba),0)
+        return self.startPoint+h*ba
 class Circle:
     circles:List[Circle]=[]
     name = "circle"
-    def __init__(self,center:Vector2,radiusPoint:Union[Vector2,None]=None,radius:Union[float,None]=None,color:Union[Tuple[int,int,int],None]=None,width:int=2):
-        self.center:Vector2=center
+    def __init__(self,center:Point,radiusPoint:Union[Point,None]=None,radius:Union[float,None]=None,color:Union[Tuple[int,int,int],None]=None,width:int=2):
+        self.center:Point=center
         self.color=color
         if radius:
             self.radius = radius
         else:
             Factory.management.append(self)
-            self.radiusPoint:Vector2 = radiusPoint
+            self.radiusPoint:Point = radiusPoint
             self.radius = (self.radiusPoint - self.center).magnitude()
         self.width=width
         Circle.circles.append(self)
@@ -190,10 +341,15 @@ class Circle:
     def getState(self):
         return self.center.getState() and (True if self.radius else self.radiusPoint.getState())
 
+    def closestPoint(self,p:Vector2):
+        if self.getState()==False:
+            return False
+        a=(p-self.center).normalize()
+        return a*self.radius+self.center
+
 class PointMover:
     def __init__(self):
         self.currentPoint:Union[None,Point]=None
-
     def update(self):
         mPress=mouse.get_pressed()
         mPos:Vector2=Vector2(mouse.get_pos())
@@ -208,6 +364,8 @@ class PointMover:
 
             if self.currentPoint!=None:
                 self.currentPoint.xy=(mPos/10+self.currentPoint*9/10).xy
+                if self.currentPoint.restriction:
+                    self.currentPoint.restrict()
         else:
             self.currentPoint=None
 
@@ -371,7 +529,7 @@ class Factory:
         b=2*(A-B).dot(C-A)
         c=(C-A).magnitude_squared()-c.radius**2
         d=b**2-4*a*c
-        if d<0:
+        if d<0 or a==0:
             return [None,None]
         if d==0:
             k=-b/2/a
@@ -390,7 +548,7 @@ class Factory:
         b=2*(A-B).dot(C-A)
         c=(C-A).magnitude_squared()-c.radius**2
         d=b**2-4*a*c
-        if d<0:
+        if d<0 or a==0:
             return [None,None]
         if d==0:
             k=-b/2/a
@@ -416,7 +574,8 @@ class Factory:
         b=2*(A-B).dot(C-A)
         c=(C-A).magnitude_squared()-c.radius**2
         d=b**2-4*a*c
-        if d<0:
+        d=round(d,2)
+        if d<0 or a==0:
             return [None,None]
         if d==0:
             k=-b/2/a
@@ -474,7 +633,13 @@ class Factory:
             return points[1]
 
 
-def inter(a,b,a_class=None,b_class=None,basePoint:Union[Point,None]=None,orientation:bool=False):
+
+
+
+
+# inter -(return)> stateCheker(Callable) -(call)> Factory.a2b() -(return)> pos or None
+
+def inter(a,b,a_class=None,b_class=None,basePoint:Union[Point,None]=None,orientation:bool=False,orientationBoth:bool=False):
     costs=["ray","line","segment","circle"]
     if not a_class:
         a_class=a.__class__.name
@@ -490,33 +655,56 @@ def inter(a,b,a_class=None,b_class=None,basePoint:Union[Point,None]=None,orienta
     if b_cost<a_cost:
         a,b=b,a
         a_class,b_class=b_class,a_class
-    match (a_class,b_class):
-        case ("line","line"):
-            return (lambda: Factory.line2line(a,b))
-        case ("line","segment"):
-            return (lambda: Factory.line2segment(a,b))
-        case ("ray","line"):
-            return (lambda: Factory.ray2line(a, b))
-        case ("segment","segment"):
-            return (lambda: Factory.segment2segment(a, b))
-        case ("ray","segment"):
-            return (lambda: Factory.ray2segment(a,b))
-        case ("ray","ray"):
-            return (lambda: Factory.ray2ray(a,b))
+    def getLambda():
+        match (a_class,b_class):
+            case ("line","line"):
+                return (lambda: Factory.line2line(a,b))
+            case ("line","segment"):
+                return (lambda: Factory.line2segment(a,b))
+            case ("ray","line"):
+                return (lambda: Factory.ray2line(a, b))
+            case ("segment","segment"):
+                return (lambda: Factory.segment2segment(a, b))
+            case ("ray","segment"):
+                return (lambda: Factory.ray2segment(a,b))
+            case ("ray","ray"):
+                return (lambda: Factory.ray2ray(a,b))
 
-        case ("line","circle"):
-            if basePoint:
-                return (lambda: Factory.line2circleSecondPoint(basePoint,a,b))
-            return (lambda: Factory.line2circle(a, b)[int(orientation)])
-        case ("segment","circle"):
-            return (lambda: Factory.segment2circle(a, b)[int(orientation)])
-        case ("ray","circle"):
-            return (lambda: Factory.ray2circle(a, b)[int(orientation)])
-        case ("circle","circle"):
-            return (lambda: Factory.circle2circle(a, b)[int(orientation)])
+            case ("line","circle"):
+                if basePoint:
+                    return (lambda: Factory.line2circleSecondPoint(basePoint,a,b))
+                if orientationBoth:
+                    return (lambda: Factory.line2circle(a, b))
+                else:
+                    return (lambda: Factory.line2circle(a, b)[int(orientation)])
+            case ("segment","circle"):
+                if orientationBoth:
+                    return (lambda: Factory.segment2circle(a, b))
+                else:
+                    return (lambda: Factory.segment2circle(a, b)[int(orientation)])
+            case ("ray","circle"):
+                if orientationBoth:
+                    return (lambda: Factory.ray2circle(a, b))
+                else:
+                    return (lambda: Factory.ray2circle(a, b)[int(orientation)])
+            case ("circle","circle"):
+                if orientationBoth:
+                    return (lambda: Factory.circle2circle(a, b))
+                else:
+                    return (lambda: Factory.circle2circle(a, b)[int(orientation)])
+    lambdaFunction=getLambda()
+    def stateChecker():
+        if (a.getState()==False) or (b.getState()==False):
+            return None
+        else:
+            return lambdaFunction()
+
+    return stateChecker
+
+
 
 def intersectionPoint(a,b,a_class=None,b_class=None,basePoint:Union[Point,None]=None,orientation:bool=False,color:Tuple[int,int,int]=None):
-    return Point(dynamicPosition=inter(a,b,a_class,b_class,basePoint,orientation),color=color)
+    return Point(dynamicPosition=inter(a,b,a_class,b_class,basePoint,orientation),color=color,metaParams={"a":a,"b":b,"a_class":a_class,"b_class":b_class,"orientation":orientation})
 
 
 def buildTriangle(p1,p2,p3,width:int=2):
@@ -554,7 +742,10 @@ def buildMedianPerpendicular(p1:Point,p2:Point,color:Union[None,Tuple[int,int,in
     return medianPerpendicular
 
 def buildNormal(p:Point,l:Line,color:Union[None,Tuple[int,int,int]]=None):
-    c=Circle(p,l.startPoint)
+    if l.endPoint is p:
+        c=Circle(p,l.startPoint)
+    else:
+        c = Circle(p, l.endPoint)
     p1=intersectionPoint(l,c,orientation=False)#Point(dynamicPosition=inter(l,c,orientation=False))#lambda:Factory.line2circle(l,c)[0])
     p2=intersectionPoint(l,c,orientation=True)#Point(dynamicPosition=inter(l,c,orientation=True))#lambda:Factory.line2circle(l,c)[1])
     normal=buildMedianPerpendicular(p1,p2,color)
@@ -602,9 +793,11 @@ def manage(management):
         object.manage()
 
 class Game:
+    WIDTH = 1500
+    HEIGHT = 700
     def __init__(self,invisible:bool=False):
-        self.WIDTH=1500
-        self.HEIGHT=700
+        self.WIDTH=Game.WIDTH
+        self.HEIGHT=Game.HEIGHT
         self.FPS=60
         self.BACKGROUND=(200,200,200)
 
@@ -621,10 +814,9 @@ class Game:
         Drawwer.setWin(self.win,invisible)
         build(p1, p2, p3)
     def update(self):
-        for even in event.get():
-            if even.type==QUIT:
-                self.stop()
         self.pointMover.update()
+        for even in event.get():
+            self.evenHandler(even)
         manage(Factory.management)
 
     def draw(self):
@@ -648,6 +840,10 @@ class Game:
 
     def stop(self):
         self.isRunning=False
+
+    def evenHandler(self,even):
+        if even.type==QUIT:
+            self.stop()
 if __name__=="__main__":
     game=Game(True)
     game.run()
