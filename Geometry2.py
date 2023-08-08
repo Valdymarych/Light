@@ -2,7 +2,8 @@
 from __future__ import annotations
 from typing import Tuple,List,Union,Dict,Callable
 from pygame import *
-from math import atan2
+from math import atan2,pi
+from time import time as tm
 init()
 def rot90(v:Vector2,clock:bool=True)->Vector2:
     return Vector2(-int(clock)*v.y,int(clock)*v.x)
@@ -11,34 +12,6 @@ def clamp(num, min_value, max_value):
 def getAngleBetweenVectors(v1,v2):
     return atan2(v1.cross(v2),v1.dot(v2))
 
-
-def build(p1,p2,p3):
-    #s1,s2,s3=buildTriangle(p1,p2,p3,1)
-    c2=Circle(p3,radius=100,color=(0,0,0))
-    p_move1=p1#Point([0,0],(0,0,0),True,[c2])
-    c=Circle(p_move1,radius=150,color=(0,0,0))
-
-
-    l=Line(p_move1,p3)
-    per1=buildNormal(p_move1,l)
-    per2=buildNormal(p3,l)
-
-    p4=intersectionPoint(per1,c)
-    p5=intersectionPoint(per2,c2)
-
-    l2=Line(p4,p5)
-    h=intersectionPoint(l,l2,color=(255,0,0))
-    t1,t2=buildTangents(h,c)
-    r1=Ray(h,t1,(0,0,0))
-    r2=Ray(h, t2, (0, 0, 0))
-    b=Ray(h,c.center,color=(0,0,255))
-    p_move = Point([0, 0], (255, 0, 0), True, [b])
-    n1=buildNormal(p_move,r1)
-    pn1=intersectionPoint(n1,r1,color=(0,0,0))
-    n2=buildNormal(p_move,r2)
-    pn2 = intersectionPoint(n2, r2,color=(0,0,0))
-    Segment(p_move,pn1,(0,0,0))
-    Segment(p_move, pn2,color=(0,0,0))
 
 def getClosestIntersectionPointParams(p:Vector2):
     primitives=Drawwer.getAllVisibleObjects()
@@ -89,7 +62,25 @@ def getClosestIntersectionPointParams(p:Vector2):
             return 10000,params
     return minLength,params
 
-class Point(Vector2):
+class GeometryObject:
+    def __init__(self,color:Union[Tuple[int,int,int],None]=None):
+        self.color=color
+        self.invisible=False
+    def __point_init__(self,color:Union[Tuple[int,int,int],None]=None):
+        self.color=color
+        self.invisible=False
+    def draw(self):
+        pass
+    @staticmethod
+    def drawAll():
+        pass
+    def getState(self):
+        pass
+    def closestPoint(self,p:Vector2):
+        pass
+
+
+class Point(Vector2,GeometryObject):
     points:List[Point]=[]
     name="point"
     def __init__(self,pos:Union[List[float],None]=None,color:Union[Tuple[int,int,int],None]=None,isMoveable:bool=False,
@@ -106,6 +97,7 @@ class Point(Vector2):
             super(Point, self).__init__(pos)
         else:
             super(Point, self).__init__(0,0)
+        super(Point,self).__point_init__(color)
         self.color=color
         self.isMoveable=isMoveable
         self.metaParams=metaParams
@@ -206,14 +198,14 @@ class Drawwer:
                 return
             draw.circle(Drawwer.win, self.color, self.center.xy, self.radius,self.width)
     @staticmethod
-    def noneColorCheck(self):
+    def noneColorCheck(self:GeometryObject):
         if not Drawwer.invisible:
             if self.color==None:
                 self.color=(25,25,52)
         if self.color == None:
             return False
         else:
-            if self.getState():
+            if self.getState() and self.invisible==False:
                 return True
 
 
@@ -253,13 +245,13 @@ class Drawwer:
         return res
 
 
-class Line:
+class Line(GeometryObject):
     lines:List[Line]=[]
     name = "line"
     def __init__(self,startPoint:Point,endPoint:Point,color:Union[Tuple[int,int,int],None]=None):
+        super(Line, self).__init__(color)
         self.startPoint = startPoint
         self.endPoint = endPoint
-        self.color = color
         Line.lines.append(self)
 
     def draw(self):
@@ -311,12 +303,13 @@ class Ray(Line):
         pa = p - self.startPoint
         h = max(pa.dot(ba) / ba.dot(ba),0)
         return self.startPoint+h*ba
-class Circle:
+class Circle(GeometryObject):
     circles:List[Circle]=[]
     name = "circle"
-    def __init__(self,center:Point,radiusPoint:Union[Point,None]=None,radius:Union[float,None]=None,color:Union[Tuple[int,int,int],None]=None,width:int=2):
+    def __init__(self,center:Point,radiusPoint:Union[Point,None]=None,radius:Union[float,None]=None,
+                 color:Union[Tuple[int,int,int],None]=None,width:int=2):
+        super(Circle, self).__init__(color)
         self.center:Point=center
-        self.color=color
         if radius:
             self.radius = radius
         else:
@@ -632,8 +625,142 @@ class Factory:
         else:
             return points[1]
 
+class AnimFactory:
+    win=None
+    @staticmethod
+    def setWin(win:Surface):
+        AnimFactory.win=win
+
+    @staticmethod
+    def animPoint(p:Point,color=(0,0,0),length=15):
+        def animPointMain(t):
+            draw.circle(AnimFactory.win,color,p.xy,5*t/length)
+        return Animation(animPointMain,True,length)
 
 
+    @staticmethod
+    def animSegment(s,mode='simple',color=(0,0,0),length=60):
+        """
+        :param s: Segment
+        :param mode: mode in ["simple","symmetry","smoothstep"]
+        :return:
+        """
+        win=AnimFactory.win
+        def animSegmentMain(t):
+            if mode == "simple":
+                draw.aaline(win, color, s.startPoint.xy, (s.startPoint + (s.endPoint - s.startPoint) * t / length).xy)
+            if mode == "symmetry":
+                draw.aaline(win, color, s.startPoint.xy, (s.startPoint + (s.endPoint - s.startPoint) * t / length/2).xy)
+                draw.aaline(win, color, s.endPoint.xy, (s.endPoint + (s.startPoint - s.endPoint) * t / length/2).xy)
+            if mode == "smoothstep":
+                t = t / 60
+                t = t ** 2 * (3 - 2 * t)
+                draw.aaline(win, color, s.startPoint.xy, (s.startPoint + (s.endPoint - s.startPoint) * t).xy)
+
+        anim=Animation(animSegmentMain, True, length)
+        return anim
+
+    @staticmethod
+    def animTriangle(s1,s2,s3,mode="simple"):
+        anim = Animation()
+        anim.addParallelTask(AnimFactory.animSegment(s1, mode))
+        anim.addParallelTask(AnimFactory.animSegment(s2, mode))
+        anim.addParallelTask(AnimFactory.animSegment(s3, mode))
+        return anim
+
+
+    @staticmethod
+    def animCircle(c:Circle,color=(0,0,0),width=1,length=60):
+        def animCircleMain(t):
+            if t==length:
+                draw.circle(AnimFactory.win,color,c.center,c.radius,width)
+            else:
+                draw.arc(AnimFactory.win,color,[c.center.x-c.radius,c.center.y-c.radius,2*c.radius,2*c.radius],0,2*pi*t/length,width)
+        anim=Animation(animCircleMain, True,length)
+        return anim
+
+    @staticmethod
+    def animWait(length=60):
+        def animWaitMain(t):
+            pass
+        anim=Animation(animWaitMain,True,length)
+        return anim
+
+    @staticmethod
+    def removeAnimation(animation:Animation,length=10):
+        def removeAnimationMain(t):
+            if t==0:
+                animation.show=lambda x:None
+        anim=Animation(removeAnimationMain,True,length)
+        return anim
+
+    @staticmethod
+    def reverseAnimation(animation:Animation,length=None):
+        showFunc=animation.copyShow
+        showFuncLength=animation.frameLen
+        if length==None:
+            length=showFuncLength
+        def reverseAnimationMain(t):
+            showFunc(showFuncLength-int(t*showFuncLength/length))
+
+        anim=Animation()
+        protoanim=Animation(reverseAnimationMain,True,length)
+        anim.addParallelTask(protoanim)
+        anim.addParallelTask(AnimFactory.removeAnimation(animation,length))
+        anim.addTask(AnimFactory.removeAnimation(protoanim,0))
+        return anim
+class Animation:
+    def __init__(self, anim:Callable=None, base:bool=False, frameLen:int=0):
+        """
+
+        :param root: elder animation
+        :param anim: drawwing function ( for base==True only )
+        :param base: base==True => drawwable; base==False => connection
+        """
+        self.base:bool = base
+        self.anim:Callable = anim
+        self.tasks: List[List[Animation]] = []
+        self.frameLen=frameLen
+
+    def addTask(self, task: Animation):
+        if not self.base:
+            self.tasks.append([task])
+            self.frameLen+=task.frameLen
+
+    def addParallelTask(self,task:Animation):
+        if not self.base:
+            if len(self.tasks)==0:
+                self.tasks.append([task])
+                self.frameLen+=task.frameLen
+            else:
+                self.tasks[-1].append(task)
+
+    def show(self,t:int):
+        """
+
+        :param t: frame index
+        :return: None
+        """
+        self.copyShow(t)
+
+    def copyShow(self,t:int):
+        """
+
+        :param t: frame index
+        :return: None
+        """
+        if self.base:
+            self.anim(t)
+        else:
+            for anims in self.tasks:
+                if anims[0].frameLen<=t:
+                    for anim in anims:
+                        anim.show(anims[0].frameLen)
+                    t-=anims[0].frameLen
+                else:
+                    for anim in anims:
+                        anim.show(t)
+                    break
 
 
 
@@ -707,87 +834,159 @@ def intersectionPoint(a,b,a_class=None,b_class=None,basePoint:Union[Point,None]=
     return Point(dynamicPosition=inter(a,b,a_class,b_class,basePoint,orientation),color=color,metaParams={"a":a,"b":b,"a_class":a_class,"b_class":b_class,"orientation":orientation})
 
 
-def buildTriangle(p1,p2,p3,width:int=2):
-    s1=Segment(p1,p2,color=(25,25,25),width=width)
-    s2=Segment(p2,p3,color=(25,25,25),width=width)
-    s3=Segment(p3,p1,color=(25,25,25),width=width)
-    return s1,s2,s3
+def getBuildAndAnim():
 
-
-def buildBisectorLine(p,l1:Line,l2:Line,orientation:Tuple[bool,bool]=(False,False),
-                  color:Union[None,Tuple[int,int,int]]=None):
-    c1=Circle(p,radius=100)
-    p11=intersectionPoint(l1, c1, orientation=orientation[0])
-    p12=intersectionPoint(l2, c1, orientation=orientation[1])
-    bisector=buildMedianPerpendicular(p11,p12,color)
-    return bisector
-
-def buildBisectorRay(p,l1:Line,l2:Line,l3:Line,orientation:Tuple[bool,bool]=(False,False),
-                  color:Union[None,Tuple[int,int,int]]=None):
-    protoBisector=buildBisectorLine(p,l1,l2,orientation)
-    p1=intersectionPoint(protoBisector,l3)#Point(dynamicPosition=inter(protoBisector,l3))#lambda: Factory.line2line())
-    bisector=Ray(p,p1,color=color)
-    return bisector
-
-def buildCevian(p:Point,l:Line,s:Segment):
-    p2=intersectionPoint(l,s)#Point(dynamicPosition=inter(l,s))#lambda:Factory.line2line(l,s))
-    Segment(p,p2,(250,0,0))
-
-def buildMedianPerpendicular(p1:Point,p2:Point,color:Union[None,Tuple[int,int,int]]=None):
-    c1=Circle(p1,p2)
-    c2=Circle(p2,p1)
-    p3=intersectionPoint(c1,c2,orientation=False)#Point(dynamicPosition=inter(c1,c2,orientation=False))#lambda:Factory.circle2circle(c1,c2)[0])
-    p4 =intersectionPoint(c1,c2,orientation=True)# Point(dynamicPosition=inter(c1,c2,orientation=True))
-    medianPerpendicular=Line(p3,p4,color)
-    return medianPerpendicular
-
-def buildNormal(p:Point,l:Line,color:Union[None,Tuple[int,int,int]]=None):
-    if l.endPoint is p:
-        c=Circle(p,l.startPoint)
-    else:
-        c = Circle(p, l.endPoint)
-    p1=intersectionPoint(l,c,orientation=False)#Point(dynamicPosition=inter(l,c,orientation=False))#lambda:Factory.line2circle(l,c)[0])
-    p2=intersectionPoint(l,c,orientation=True)#Point(dynamicPosition=inter(l,c,orientation=True))#lambda:Factory.line2circle(l,c)[1])
-    normal=buildMedianPerpendicular(p1,p2,color)
-    return normal
-
-def buildExternallyInscribedCircle(p1,p2,l1,l2,l3,orientation,width=2):
-    b1 = buildBisectorLine(p1, l2, l3, (False,orientation[0]))
-    b2 = buildBisectorLine(p2, l1, l3, (False,orientation[1]))
-    o = intersectionPoint(b1,b2,color=(100,100,0))#Point(color=(100, 100, 0), dynamicPosition=inter(b1,b2))#=lambda: Factory.line2line(b1, b2))
-    normal = buildNormal(o, l1, None)
-    h = intersectionPoint(l1,normal)#Point(dynamicPosition=inter(l1,normal))#lambda: Factory.line2line(l1, normal))
-    c = Circle(o, h, color=(25, 25, 25),width=width)
-    return c
-
-def buildCircumscribedCircle(p1,p2,p3,width=2)->Circle:
     """
-    Описане коло
-    :param p1: вершина1
-    :param p2: вершина2
-    :param p3: вершина3
-    :param width: товщина кола
-    :return: Коло описане навколо трикутника
+    buildObject (*objects,*params) ->  (mainObject,Tree[Objects])
+    :return:
     """
-    per1=buildMedianPerpendicular(p1,p2)
-    per2=buildMedianPerpendicular(p2,p3)
-    cen=intersectionPoint(per1,per2)#Point(dynamicPosition=inter(per1,per2))#lambda:Factory.line2line(per1,per2),color=(200,0,0))
-    c=Circle(cen,p1,color=(25,25,25),width=width)
-    return c
 
-def buildMidpoint(p1,p2) -> Point:
-    l=Line(p1,p2)
-    per=buildMedianPerpendicular(p1,p2)
-    midPoint=intersectionPoint(l,per)
-    return midPoint
+    def build(A,B,C):
+        # будуємо кут ABC
+        AB=buildLine(A,B,color=(0,0,0))
+        BC=buildLine(B,C,color=(0,0,0))
+        CA = buildLine(C,A,color=(0,0,0))
 
-def buildTangents(p,c)->List[Point]:
-    m=buildMidpoint(p,c.center)
-    c2=Circle(m,p)
-    t1=intersectionPoint(c,c2,orientation=True)
-    t2 = intersectionPoint(c, c2, orientation=False)
-    return [t1,t2]
+        circle=buildCircumscribedCircle(A,B,C,color=(0,0,0))
+        return None
 
+    def buildCircle(center:Point,radiusPoint:Union[Point,None]=None,radius:Union[float,None]=None,
+                 color:Union[Tuple[int,int,int],None]=None,width:int=2):
+        return Circle(center,radiusPoint,radius,color,width)
+
+    def buildLine(startPoint:Point,endPoint:Point,color:Union[Tuple[int,int,int],None]=None):
+        return Line(startPoint,endPoint,color)
+
+    def buildSegment(startPoint:Point,endPoint:Point,color:Union[Tuple[int,int,int],None]=None,width:int=2):
+        return Segment(startPoint,endPoint,color,width)
+
+    def buildRay(startPoint:Point,endPoint:Point,color:Union[Tuple[int,int,int],None]=None):
+        return Ray(startPoint,endPoint,color)
+
+    def buildTriangle(p1,p2,p3,color=(25,25,25),width:int=2):
+        s1=buildSegment(p1,p2,color=color,width=width)
+        s2=buildSegment(p2,p3,color=color,width=width)
+        s3=buildSegment(p3,p1,color=color,width=width)
+
+        return [s1,s2,s3]
+
+
+    def buildBisectorLine(p,l1:Line,l2:Line,orientation:Tuple[bool,bool]=(False,False),
+                      color:Union[None,Tuple[int,int,int]]=None):
+        c1=buildCircle(p,radius=100)
+        p11=intersectionPoint(l1, c1, orientation=orientation[0])
+        p12=intersectionPoint(l2, c1, orientation=orientation[1])
+        bisector=buildMedianPerpendicular(p11,p12,color)
+        return bisector
+
+    def buildBisectorRay(p,l1:Line,l2:Line,l3:Line,orientation:Tuple[bool,bool]=(False,False),
+                      color:Union[None,Tuple[int,int,int]]=None):
+        protoBisector=buildBisectorLine(p,l1,l2,orientation)
+        p1=intersectionPoint(protoBisector,l3)#Point(dynamicPosition=inter(protoBisector,l3))#lambda: Factory.line2line())
+        bisector=buildRay(p,p1,color=color)
+        return bisector
+
+    def buildCevian(p:Point,l:Line,s:Segment):
+        p2=intersectionPoint(l,s)#Point(dynamicPosition=inter(l,s))#lambda:Factory.line2line(l,s))
+        return buildSegment(p,p2,(250,0,0))
+
+    def buildMedianPerpendicular(p1:Point,p2:Point,color:Union[None,Tuple[int,int,int]]=None):
+        c1=buildCircle(p1,p2)
+        c2=buildCircle(p2,p1)
+        p3=intersectionPoint(c1,c2,orientation=False)#Point(dynamicPosition=inter(c1,c2,orientation=False))#lambda:Factory.circle2circle(c1,c2)[0])
+        p4 =intersectionPoint(c1,c2,orientation=True)# Point(dynamicPosition=inter(c1,c2,orientation=True))
+        medianPerpendicular=buildLine(p3,p4,color)
+        return medianPerpendicular
+
+    def buildNormal(p:Point,l:Line,color:Union[None,Tuple[int,int,int]]=None):
+        if l.endPoint is p:
+            c=buildCircle(p,l.startPoint)
+        else:
+            c = buildCircle(p, l.endPoint)
+        p1=intersectionPoint(l,c,orientation=False)#Point(dynamicPosition=inter(l,c,orientation=False))#lambda:Factory.line2circle(l,c)[0])
+        p2=intersectionPoint(l,c,orientation=True)#Point(dynamicPosition=inter(l,c,orientation=True))#lambda:Factory.line2circle(l,c)[1])
+        normal=buildMedianPerpendicular(p1,p2,color)
+        return normal
+
+    def buildExternallyInscribedCircle(p1,p2,l1,l2,l3,orientation,width=2):
+        b1 = buildBisectorLine(p1, l2, l3, (False,orientation[0]))
+        b2 = buildBisectorLine(p2, l1, l3, (False,orientation[1]))
+        o = intersectionPoint(b1,b2,color=(100,100,0))#Point(color=(100, 100, 0), dynamicPosition=inter(b1,b2))#=lambda: Factory.line2line(b1, b2))
+        normal = buildNormal(o, l1, None)
+        h = intersectionPoint(l1,normal)#Point(dynamicPosition=inter(l1,normal))#lambda: Factory.line2line(l1, normal))
+        c = buildCircle(o, h, color=(25, 25, 25),width=width)
+        return c
+
+    def buildCircumscribedCircle(p1,p2,p3,color=None,width=2)->Circle:
+        """
+        Описане коло
+        :param p1: вершина1
+        :param p2: вершина2
+        :param p3: вершина3
+        :param width: товщина кола
+        :return: Коло описане навколо трикутника
+        """
+        per1=buildMedianPerpendicular(p1,p2)
+        per2=buildMedianPerpendicular(p2,p3)
+        cen=intersectionPoint(per1,per2)#Point(dynamicPosition=inter(per1,per2))#lambda:Factory.line2line(per1,per2),color=(200,0,0))
+        c=buildCircle(cen,p1,color=color,width=width)
+        return c
+
+    def buildMidpoint(p1,p2) -> Point:
+        l=buildLine(p1,p2)
+        per=buildMedianPerpendicular(p1,p2)
+        midPoint=intersectionPoint(l,per)
+        return midPoint
+
+    def buildTangents(p,c)->List[Point]:
+        m=buildMidpoint(p,c.center)
+        c2=buildCircle(m,p)
+        t1=intersectionPoint(c,c2,orientation=True)
+        t2 = intersectionPoint(c, c2, orientation=False)
+        return [t1,t2]
+
+        return build
+
+    def anim(A,B,C):
+        root=Animation()
+
+        def recurse(A,B,C,iter=5):
+            M1=Point(dynamicPosition=lambda :(A+B)/2)#buildMidpoint(A,B)
+            M2=Point(dynamicPosition=lambda :(B+C)/2)
+            M3=Point(dynamicPosition=lambda :(A+C)/2)
+
+            tringleAnim = Animation()
+            tringleAnim.addTask(AnimFactory.animTriangle(buildSegment(M1,M2),buildSegment(M2,M3),buildSegment(M3,M1)))
+            if iter>0:
+                nextgen=Animation()
+
+                nextgen.addParallelTask(recurse(M1,M2,B,iter-1))
+                nextgen.addParallelTask(recurse(A, M3, M1,iter-1))
+                nextgen.addParallelTask(recurse(M3,C,M2,iter-1))
+                tringleAnim.addTask(nextgen)
+            return tringleAnim
+
+        AB=buildSegment(A,B)
+        BC = buildSegment(B,C)
+        CA = buildSegment(C,A)
+
+        serpinsky=recurse(A,B,C)
+        triangle=AnimFactory.animTriangle(AB,BC,CA)
+
+        root.addTask(triangle)
+
+
+        root.addTask(serpinsky)
+        root.addTask(AnimFactory.reverseAnimation(serpinsky))
+        root.addTask(AnimFactory.reverseAnimation(triangle))
+
+        return root
+
+    return build,anim
+
+
+
+build,anim=getBuildAndAnim()
 def manage(management):
     for object in management:
         object.manage()
@@ -807,12 +1006,16 @@ class Game:
 
 
 
-        p1=Point([600,100],isMoveable=True,color=(25,25,25))
-        p2=Point([700,100],isMoveable=True,color=(25,25,25))
-        p3=Point([800, 400],isMoveable=True,color=(25,25,25))
+        p1=Point([750,100],isMoveable=True,color=(25,25,25))
+        p2=Point([1300,600],isMoveable=True,color=(25,25,25))
+        p3=Point([200, 600],isMoveable=True,color=(25,25,25))
         self.pointMover=PointMover()
         Drawwer.setWin(self.win,invisible)
+        AnimFactory.setWin(self.win)
         build(p1, p2, p3)
+        self.anim=anim(p1,p2,p3)
+        print(len(Line.lines),len(Circle.circles),len(Point.points))
+        self.t=0
     def update(self):
         self.pointMover.update()
         for even in event.get():
@@ -820,9 +1023,13 @@ class Game:
         manage(Factory.management)
 
     def draw(self):
-        Line.drawAll()
-        Circle.drawAll()
-        Point.drawAll()
+        if False:
+            Line.drawAll()
+            Circle.drawAll()
+            Point.drawAll()
+        else:
+            self.anim.show(self.t)
+        self.t += 1
 
 
     def windowUpdate(self):
@@ -832,6 +1039,7 @@ class Game:
         self.clock.tick(self.FPS)
 
     def run(self):
+        self.win.fill(self.BACKGROUND)
         while self.isRunning:
             self.update()
             self.draw()
