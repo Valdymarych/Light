@@ -120,12 +120,11 @@ class FlatBorder(Border):
         if self.along.cross(vel)==0:
             print(self.along,vel)
         k=-(self.along.cross(startPos-self.pos))/(self.along.cross(vel))
-        if k<=0 or k>1:
+        if k<=0.00000001 or k>1:
             return False
         q=((startPos-self.pos).cross(vel))/(self.along.cross(vel))
         if q<0 or q>1:
             return False
-
 
         return [startPos+k*vel,k,vel-2*self.normal*vel.dot(self.normal)]
 
@@ -165,7 +164,7 @@ def pressureCollectOfX(x):
     return pressureCollect
 def pressureShowOfX(x:FlatBorder):
     def pressureShow(effect):
-        print(effect.a/100/effect.period)
+        print(effect.a/x.along.magnitude()/effect.period)
         effect.a=0
     return pressureShow
 
@@ -178,22 +177,22 @@ pos=[450,250]
 size=[100,100]
 
 
-b1=FlatBorder([pos[0],pos[1]],[pos[0]+size[0],pos[1]])
-b2=FlatBorder([pos[0]+size[0],pos[1]],[pos[0]+size[0],pos[1]+size[1]])
-b3=FlatBorder([pos[0]+size[0],pos[1]+size[1]],[pos[0],pos[1]+size[1]])
-b4=FlatBorder([pos[0],pos[1]+size[1]],[pos[0],pos[1]])
+b1=FlatBorder([500,200],[600,300])
+b2=FlatBorder([600,300],[100,400])
+b3=FlatBorder([100,400],[500,200])
+
 
 Win=Window(1000,500,[SideEffect(pressureShowOfX(b1),pressureCollectOfX(b1),1000),
                      SideEffect(pressureShowOfX(b2),pressureCollectOfX(b2),1000),
                      SideEffect(pressureShowOfX(b3),pressureCollectOfX(b3),1000),
-                     SideEffect(pressureShowOfX(b4),pressureCollectOfX(b4),1000)])
+           ])
 
 Win.add_object(b1)
 Win.add_object(b2)
 Win.add_object(b3)
-Win.add_object(b4)
+#Win.add_object(b4)
 for i in range(1000):
-    Win.add_object(Ball([500,300],[b1,b2,b3,b4],10))
+    Win.add_object(Ball([500,300],[b1,b2,b3],1))
 #Win.add_object(Ball([100.5,50.6],[b1]))
 #Win.add_object(Ball([100.234,50.534],[b1]))
 Win.loop()
